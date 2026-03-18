@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude CLI (local development only)
+CLAUDE.md
+.claude/
+
+# Handoff and development notes
+subcoder/
+HANDOFF*.md
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Sensitive files
+*.pem
+*.key
+seed*.txt
+*secret*
+*credential*
+
+# Extension unpacked builds (keep dist/ for release)
+packages/extension/unpacked/

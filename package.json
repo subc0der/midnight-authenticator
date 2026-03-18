@@ -1,0 +1,24 @@
+{
+  "name": "midnight-authenticator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-knowledge TOTP authenticator for Midnight blockchain",
+  "author": "subc0der",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
