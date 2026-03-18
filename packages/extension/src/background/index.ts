@@ -3,8 +3,17 @@
  * Handles message routing, vault management, and proof generation.
  */
 
+import { getEncryptedStorage } from '../shared/storage/encrypted-storage';
+
+const storage = getEncryptedStorage();
+
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Ignore messages meant for offscreen document
+  if (message.type === 'DERIVE_KEY') {
+    return false;
+  }
+
   // Get trusted origin from sender, not message payload
   const origin = sender.origin || (sender.url ? new URL(sender.url).origin : 'unknown');
 
@@ -44,51 +53,61 @@ async function handleMessage(
   }
 }
 
-// Vault state (in-memory, lost on SW dormancy)
-let vaultUnlocked = false;
-let vaultExists = false;
-
 async function getVaultStatus(): Promise<{ exists: boolean; unlocked: boolean }> {
-  // Check if vault exists in storage
-  const result = await chrome.storage.local.get(['vault']);
-  vaultExists = !!result['vault'];
-  return { exists: vaultExists, unlocked: vaultUnlocked };
+  const exists = await storage.exists();
+  const unlocked = storage.isUnlocked();
+  return { exists, unlocked };
 }
 
-async function initVault(password: string): Promise<{ success: boolean }> {
-  // TODO: Implement proper encrypted storage with Argon2id
-  await chrome.storage.local.set({ vault: { initialized: true } });
-  vaultExists = true;
-  vaultUnlocked = true;
-  return { success: true };
+async function initVault(password: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await storage.initialize(password);
+    resetAutoLockTimer();
+    return { success: true };
+  } catch (error) {
+    console.error('[Background] Failed to initialize vault:', error);
+    return { success: false, error: (error as Error).message };
+  }
 }
 
 async function unlockVault(password: string): Promise<{ success: boolean; error?: string }> {
-  // TODO: Implement proper decryption
-  const result = await chrome.storage.local.get(['vault']);
-  if (!result['vault']) {
-    return { success: false, error: 'Vault not initialized' };
+  try {
+    await storage.unlock(password);
+    resetAutoLockTimer();
+    return { success: true };
+  } catch (error) {
+    console.error('[Background] Failed to unlock vault:', error);
+    return { success: false, error: (error as Error).message };
   }
-  vaultUnlocked = true;
-  return { success: true };
 }
 
 async function lockVault(): Promise<{ success: boolean }> {
-  vaultUnlocked = false;
+  storage.lock();
+  await chrome.alarms.clear('auto-lock');
   return { success: true };
 }
 
 async function getAccounts(): Promise<{ success: boolean; accounts?: unknown[]; error?: string }> {
-  if (!vaultUnlocked) {
+  if (!storage.isUnlocked()) {
     return { success: false, error: 'Vault is locked' };
   }
-  // TODO: Get accounts from encrypted storage
-  return { success: true, accounts: [] };
+
+  try {
+    const data = await storage.load();
+    return { success: true, accounts: data?.accounts || [] };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
 }
 
-// Auto-lock timer
+// Auto-lock after 5 minutes of inactivity
+function resetAutoLockTimer(): void {
+  chrome.alarms.create('auto-lock', { delayInMinutes: 5 });
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'auto-lock') {
+    console.log('[Background] Auto-locking vault due to inactivity');
     lockVault();
   }
 });

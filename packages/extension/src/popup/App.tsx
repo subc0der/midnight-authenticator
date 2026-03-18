@@ -4,7 +4,10 @@ type AppState = 'loading' | 'locked' | 'unlocked' | 'setup';
 
 export function App() {
   const [state, setState] = useState<AppState>('loading');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     checkVaultStatus();
@@ -24,6 +27,75 @@ export function App() {
     }
   }
 
+  async function handleCreateVault() {
+    setError(null);
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'INIT_VAULT',
+        password,
+      });
+
+      if (response?.success) {
+        setPassword('');
+        setConfirmPassword('');
+        setState('unlocked');
+      } else {
+        setError(response?.error || 'Failed to create vault');
+      }
+    } catch (err) {
+      setError('Failed to create vault');
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleUnlock() {
+    setError(null);
+
+    if (!password) {
+      setError('Please enter your password');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'UNLOCK_VAULT',
+        password,
+      });
+
+      if (response?.success) {
+        setPassword('');
+        setState('unlocked');
+      } else {
+        setError(response?.error || 'Incorrect password');
+      }
+    } catch (err) {
+      setError('Failed to unlock vault');
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleLock() {
+    await chrome.runtime.sendMessage({ type: 'LOCK_VAULT' });
+    setState('locked');
+  }
+
   if (state === 'loading') {
     return (
       <div className="container">
@@ -37,10 +109,29 @@ export function App() {
     return (
       <div className="container">
         <h1>Midnight Authenticator</h1>
-        <p>Welcome! Set up your vault to get started.</p>
-        <button onClick={() => setState('unlocked')}>
-          Create Vault
+        <p>Create a password to secure your vault.</p>
+        <input
+          type="password"
+          placeholder="Password (min 8 characters)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={isProcessing}
+        />
+        <input
+          type="password"
+          placeholder="Confirm password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          disabled={isProcessing}
+        />
+        <button
+          onClick={handleCreateVault}
+          disabled={isProcessing}
+          aria-busy={isProcessing}
+        >
+          {isProcessing ? 'Creating...' : 'Create Vault'}
         </button>
+        {error && <p className="error" role="alert">{error}</p>}
       </div>
     );
   }
@@ -50,17 +141,34 @@ export function App() {
       <div className="container">
         <h1>Midnight Authenticator</h1>
         <p>Enter your password to unlock.</p>
-        <input type="password" placeholder="Password" />
-        <button onClick={() => setState('unlocked')}>
-          Unlock
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
+          disabled={isProcessing}
+        />
+        <button
+          onClick={handleUnlock}
+          disabled={isProcessing}
+          aria-busy={isProcessing}
+        >
+          {isProcessing ? 'Unlocking...' : 'Unlock'}
         </button>
+        {error && <p className="error" role="alert">{error}</p>}
       </div>
     );
   }
 
   return (
     <div className="container">
-      <h1>Midnight Authenticator</h1>
+      <div className="header">
+        <h1>Midnight Authenticator</h1>
+        <button className="lock-button" onClick={handleLock} title="Lock vault">
+          Lock
+        </button>
+      </div>
       <p className="status">Ready</p>
       <div className="accounts">
         <p className="empty">No accounts yet. Add one to get started.</p>
