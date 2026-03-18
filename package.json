@@ -5,15 +5,14 @@
   "description": "Zero-knowledge TOTP authenticator for Midnight blockchain",
   "author": "subc0der",
   "license": "MIT",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "packageManager": "pnpm@9.0.0",
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present"
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean",
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

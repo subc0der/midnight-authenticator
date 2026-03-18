@@ -1,0 +1,13 @@
+{
+  "name": "@midnight-authenticator/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "bash scripts/compile.sh",
+    "clean": "rimraf src/managed"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.0"
+  }
+}
