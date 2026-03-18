@@ -27,10 +27,10 @@ async function handleMessage(
       return getVaultStatus();
 
     case 'INIT_VAULT':
-      return initVault(message.password as string);
+      return initVault(message['password'] as string);
 
     case 'UNLOCK_VAULT':
-      return unlockVault(message.password as string);
+      return unlockVault(message['password'] as string);
 
     case 'LOCK_VAULT':
       return lockVault();
@@ -51,7 +51,7 @@ let vaultExists = false;
 async function getVaultStatus(): Promise<{ exists: boolean; unlocked: boolean }> {
   // Check if vault exists in storage
   const result = await chrome.storage.local.get(['vault']);
-  vaultExists = !!result.vault;
+  vaultExists = !!result['vault'];
   return { exists: vaultExists, unlocked: vaultUnlocked };
 }
 
@@ -66,7 +66,7 @@ async function initVault(password: string): Promise<{ success: boolean }> {
 async function unlockVault(password: string): Promise<{ success: boolean; error?: string }> {
   // TODO: Implement proper decryption
   const result = await chrome.storage.local.get(['vault']);
-  if (!result.vault) {
+  if (!result['vault']) {
     return { success: false, error: 'Vault not initialized' };
   }
   vaultUnlocked = true;

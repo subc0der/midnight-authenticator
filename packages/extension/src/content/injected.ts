@@ -7,11 +7,13 @@
  * - Spreads payload BEFORE setting type to prevent override attacks
  */
 
-const EXTENSION_ID = 'midnight-authenticator';
+const INJECTED_EXTENSION_ID = 'midnight-authenticator';
+// SECURITY: Only message types that require user approval popup are allowed.
+// GET_ACCOUNTS removed - was a privacy leak (any site could enumerate user's accounts)
+// See: subcoder/gemini/REVIEW_FEEDBACK.md - Critical Issue #2
 const ALLOWED_MESSAGE_TYPES = [
-  'AUTH_REQUEST',
-  'GET_ACCOUNTS',
-  'REGISTER_ACCOUNT',
+  'AUTH_REQUEST',      // Requires popup approval
+  'REGISTER_ACCOUNT',  // Requires popup approval
 ] as const;
 
 type AllowedMessageType = typeof ALLOWED_MESSAGE_TYPES[number];
@@ -22,7 +24,7 @@ window.addEventListener('message', async (event) => {
   if (event.origin !== window.location.origin) return;
 
   const message = event.data;
-  if (!message || message.source !== `${EXTENSION_ID}-dapp`) return;
+  if (!message || message.source !== `${INJECTED_EXTENSION_ID}-dapp`) return;
 
   // Validate message type
   if (!ALLOWED_MESSAGE_TYPES.includes(message.type as AllowedMessageType)) {
@@ -41,14 +43,14 @@ window.addEventListener('message', async (event) => {
     // Send response back to page
     window.postMessage({
       type: `${message.type}_RESPONSE`,
-      source: EXTENSION_ID,
+      source: INJECTED_EXTENSION_ID,
       requestId: message.requestId,
       payload: response,
     }, window.location.origin);
   } catch (error) {
     window.postMessage({
       type: `${message.type}_RESPONSE`,
-      source: EXTENSION_ID,
+      source: INJECTED_EXTENSION_ID,
       requestId: message.requestId,
       payload: { success: false, error: sanitizeError(error) },
     }, window.location.origin);

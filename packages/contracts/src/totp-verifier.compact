@@ -18,13 +18,15 @@ import CompactStandardLibrary;
 // On-chain state
 export ledger registeredAccounts: Map<Bytes<32>, Bytes<32>>; // accountId -> commitment
 export ledger usedNonces: Map<Bytes<32>, Uint<64>>;          // accountId -> lastNonce
+export ledger lastAuthProof: Map<Bytes<32>, Bytes<32>>;      // accountId -> blinded auth proof
 export ledger round: Counter;                                 // Privacy counter
 export ledger authCount: Counter;                             // Analytics
 
 // Witnesses - provide private data
 witness getSecret(): Bytes<32>;
 witness getBlinder(): Bytes<32>;
-witness getCurrentTimeWindow(): Uint<64>;
+// Note: timeWindow is now a PUBLIC input (expectedTimeWindow parameter)
+// This fixes the "unconstrained timeWindow" issue from Gemini review.
 
 /**
  * Register a new account with commitment.
@@ -38,14 +40,27 @@ export circuit registerAccount(accountId: Bytes<32>, commitment: Bytes<32>): [] 
 }
 
 /**
- * Authenticate by proving knowledge of secret.
- * Returns true if authentication succeeds.
+ * Authenticate by proving knowledge of secret for a specific time window.
+ *
+ * The verifier provides the expected timeWindow (current 30-second interval).
+ * The circuit computes authCode binding the proof to that specific window.
+ *
+ * Security model:
+ * - timeWindow is PUBLIC (verifier-provided, disclosed)
+ * - secret/blinder are PRIVATE (from witness)
+ * - authCode binds the proof to the specific time window
+ *
+ * FIX: Gemini review identified that unused authCode didn't constrain the proof.
+ * Now expectedTimeWindow is a public input, and authCode computation uses it.
  */
-export circuit authenticate(accountId: Bytes<32>, nonce: Uint<64>): Boolean {
+export circuit authenticate(
+  accountId: Bytes<32>,
+  nonce: Uint<64>,
+  expectedTimeWindow: Uint<64>  // Public: verifier specifies expected window
+): Boolean {
   // Get private inputs
   const secret = getSecret();
   const blinder = getBlinder();
-  const timeWindow = getCurrentTimeWindow();
 
   // Verify commitment matches registered account
   assert(registeredAccounts.member(disclose(accountId)), "Account not registered");
@@ -60,9 +75,20 @@ export circuit authenticate(accountId: Bytes<32>, nonce: Uint<64>): Boolean {
   assert(disclose(nonce) > lastNonce, "Nonce already used");
   usedNonces.insert(disclose(accountId), disclose(nonce));
 
-  // Compute auth code (proves knowledge, never disclosed)
-  // This is the ZK magic - we prove we can compute the code without revealing it
-  const _authCode = persistentHash<[Bytes<32>, Uint<64>]>([secret, timeWindow]);
+  // Compute auth code for the VERIFIER-SPECIFIED time window.
+  // This binds the proof to the specific time window.
+  const authCode = persistentHash<[Bytes<32>, Uint<64>]>([secret, disclose(expectedTimeWindow)]);
+
+  // Create blinded auth proof: hash(authCode, blinder, nonce)
+  // This CONSTRAINS the authCode computation by using it in a ledger update.
+  // - blinder: ensures proofs don't reveal the authCode
+  // - nonce: ensures unlinkability for multiple auths in same time window
+  // (per review-checklist.md: "Round counter incremented to prevent tx linking")
+  const authProof = persistentHash<[Bytes<32>, Bytes<32>, Uint<64>]>([authCode, blinder, disclose(nonce)]);
+
+  // Store auth proof on-chain - this creates the constraint binding.
+  // Each auth for the same account overwrites previous (no history tracking).
+  lastAuthProof.insert(disclose(accountId), disclose(authProof));
 
   // Update counters
   round.increment(1);

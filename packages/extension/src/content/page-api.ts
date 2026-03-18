@@ -3,7 +3,7 @@
  * Provides window.midnightAuth API for dApps
  */
 
-const EXTENSION_ID = 'midnight-authenticator';
+const PAGE_API_EXTENSION_ID = 'midnight-authenticator';
 
 interface AuthRequest {
   accountId: string;
@@ -18,8 +18,9 @@ interface AuthResult {
 
 interface MidnightAuthAPI {
   requestAuth: (request: AuthRequest) => Promise<AuthResult>;
-  getAccounts: () => Promise<{ success: boolean; accounts?: string[]; error?: string }>;
   isAvailable: () => boolean;
+  // Note: getAccounts() intentionally not exposed to dApps for privacy.
+  // Users select accounts in the extension popup during requestAuth flow.
 }
 
 function generateRequestId(): string {
@@ -34,7 +35,7 @@ function sendRequest<T>(type: string, payload: Record<string, unknown> = {}): Pr
       if (event.origin !== window.location.origin) return;
 
       const message = event.data;
-      if (!message || message.source !== EXTENSION_ID) return;
+      if (!message || message.source !== PAGE_API_EXTENSION_ID) return;
       if (message.type !== `${type}_RESPONSE`) return;
       if (message.requestId !== requestId) return;
 
@@ -51,7 +52,7 @@ function sendRequest<T>(type: string, payload: Record<string, unknown> = {}): Pr
 
     window.postMessage({
       type,
-      source: `${EXTENSION_ID}-dapp`,
+      source: `${PAGE_API_EXTENSION_ID}-dapp`,
       requestId,
       payload,
     }, window.location.origin);
@@ -66,11 +67,7 @@ function sendRequest<T>(type: string, payload: Record<string, unknown> = {}): Pr
 
 const midnightAuth: MidnightAuthAPI = {
   async requestAuth(request: AuthRequest): Promise<AuthResult> {
-    return sendRequest<AuthResult>('AUTH_REQUEST', request);
-  },
-
-  async getAccounts(): Promise<{ success: boolean; accounts?: string[]; error?: string }> {
-    return sendRequest('GET_ACCOUNTS');
+    return sendRequest<AuthResult>('AUTH_REQUEST', { ...request });
   },
 
   isAvailable(): boolean {
