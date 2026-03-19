@@ -176,52 +176,62 @@ window.addEventListener('message', (event) => {
   if (!message || message.source !== `${PAGE_API_EXTENSION_ID}-content`) return;
 
   if (message.type === 'CHECK_LACE_STATUS') {
-    const midnight = (window as any).midnight;
+    // Handle Lace status check (may involve async operations)
+    checkLaceStatus(message.requestId);
+  }
+});
 
-    // Lace exposes wallets as UUID keys in window.midnight
-    // Find the first available wallet API
-    let laceAvailable = false;
-    let proverUri: string | undefined;
-    let walletApi: any = null;
+/**
+ * Check Lace wallet status and respond via postMessage.
+ * Handles both sync and async serviceUriConfig methods.
+ */
+async function checkLaceStatus(requestId: string): Promise<void> {
+  const midnight = (window as any).midnight;
 
-    if (midnight && typeof midnight === 'object') {
-      // Look for wallet APIs (they have UUID keys)
-      for (const key of Object.keys(midnight)) {
-        const api = midnight[key];
-        if (api && typeof api === 'object') {
-          // Check if it's a Midnight wallet API (has apiVersion, name, etc.)
-          if (api.apiVersion || api.enable || api.state) {
-            walletApi = api;
-            laceAvailable = true;
-            break;
-          }
-        }
-      }
+  // Lace exposes wallets as UUID keys in window.midnight
+  // Find the first available wallet API
+  let laceAvailable = false;
+  let proverUri: string | undefined;
+  let walletApi: any = null;
 
-      // Try to get prover URI from the wallet
-      if (walletApi) {
-        try {
-          // Different ways Lace might expose the config
-          if (typeof walletApi.serviceUriConfig === 'function') {
-            const config = walletApi.serviceUriConfig();
-            proverUri = config?.proverServerUri;
-          }
-        } catch {
-          // Ignore errors getting config
+  if (midnight && typeof midnight === 'object') {
+    // Look for wallet APIs (they have UUID keys)
+    for (const key of Object.keys(midnight)) {
+      const api = midnight[key];
+      if (api && typeof api === 'object') {
+        // Check if it's a Midnight wallet API (has apiVersion, name, etc.)
+        if (api.apiVersion || api.enable || api.state) {
+          walletApi = api;
+          laceAvailable = true;
+          break;
         }
       }
     }
 
-    
-    window.postMessage({
-      type: 'LACE_STATUS_RESPONSE',
-      source: `${PAGE_API_EXTENSION_ID}-page`,
-      requestId: message.requestId,
-      laceAvailable,
-      proverUri,
-    }, window.location.origin);
+    // Try to get prover URI from the wallet
+    // Handle both sync and async serviceUriConfig (Lace API may vary)
+    if (walletApi && typeof walletApi.serviceUriConfig === 'function') {
+      try {
+        const configOrPromise = walletApi.serviceUriConfig();
+        // Check if it's a Promise and await it
+        const config = (configOrPromise && typeof configOrPromise.then === 'function')
+          ? await configOrPromise
+          : configOrPromise;
+        proverUri = config?.proverServerUri;
+      } catch {
+        // Ignore errors getting config
+      }
+    }
   }
-});
+
+  window.postMessage({
+    type: 'LACE_STATUS_RESPONSE',
+    source: `${PAGE_API_EXTENSION_ID}-page`,
+    requestId,
+    laceAvailable,
+    proverUri,
+  }, window.location.origin);
+}
 
 console.log('[PageAPI] window.midnightAuth is available');
 

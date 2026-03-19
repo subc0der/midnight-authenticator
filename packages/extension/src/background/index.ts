@@ -772,34 +772,33 @@ async function handleAuthRequest(
 }> {
   console.log(`[Background] Auth request for account: ${accountId}, challenge: ${challenge || 'none'}, origin: ${origin}`);
 
-  // Check if vault is locked
-  if (!storage.isUnlocked()) {
-    // Store the pending request
-    const requestId = generateRequestId();
-    await storePendingRequest({
-      requestId,
-      origin: origin || 'unknown',
-      accountId,
-      challenge,
-      tabId,
-    });
+  // SECURITY: Always require explicit user approval for auth requests.
+  // Never silently generate proofs, even when vault is unlocked.
+  // This prevents malicious websites from obtaining proofs without user consent.
 
-    console.log(`[Background] Vault locked - stored pending request: ${requestId}`);
+  // Store the pending request
+  const requestId = generateRequestId();
+  await storePendingRequest({
+    requestId,
+    origin: origin || 'unknown',
+    accountId,
+    challenge,
+    tabId,
+  });
 
-    // Open the popup for user to unlock
-    await openPopup();
+  console.log(`[Background] Stored pending auth request: ${requestId}, vault unlocked: ${storage.isUnlocked()}`);
 
-    // Return pending status - the dApp will need to poll or wait for completion
-    return {
-      success: false,
-      error: 'Extension is locked. Please unlock to continue.',
-      pendingRequestId: requestId,
-    };
-  }
+  // Open the popup for user approval
+  await openPopup();
 
-  // Vault is unlocked - generate proof directly
-  // TODO: Add user approval UI before auto-generating proof
-  return generateAuthProof(accountId);
+  // Return pending status - the dApp will wait for AUTH_REQUEST_COMPLETED
+  return {
+    success: false,
+    error: storage.isUnlocked()
+      ? 'Approval required. Please approve in the extension popup.'
+      : 'Extension is locked. Please unlock to continue.',
+    pendingRequestId: requestId,
+  };
 }
 
 /**
@@ -921,7 +920,25 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'auto-lock') {
     console.log('[Background] Auto-locking vault due to inactivity');
     lockVault();
+  } else if (alarm.name === 'cleanup-pending-requests') {
+    console.log('[Background] Running periodic pending request cleanup');
+    cleanupPendingRequests();
   }
 });
+
+// ─── Startup Cleanup ─────────────────────────────────────────────────────────
+
+// Clean up expired pending requests on startup and set up periodic cleanup
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('[Background] Extension started, cleaning up expired requests');
+  await cleanupPendingRequests();
+});
+
+// Also run cleanup when service worker initializes (covers install and SW restart)
+(async () => {
+  await cleanupPendingRequests();
+  // Set up periodic cleanup every 10 minutes
+  chrome.alarms.create('cleanup-pending-requests', { periodInMinutes: 10 });
+})();
 
 console.log('[Background] Midnight Authenticator service worker started (ZK-native mode)');
