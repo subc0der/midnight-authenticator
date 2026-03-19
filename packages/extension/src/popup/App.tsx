@@ -17,6 +17,34 @@ interface ZkAuthCode {
   remainingSeconds: number;
 }
 
+interface ProofStatus {
+  activeProvider: string | null;
+  proofServerAvailable: boolean;
+  laceAvailable: boolean;
+  mockEnabled: boolean;
+}
+
+interface PendingRequest {
+  requestId: string;
+  origin: string;
+  accountId: string;
+  challenge?: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/**
+ * Check if extension is in development mode (no update_url in manifest).
+ */
+function isDevelopment(): boolean {
+  try {
+    const manifest = chrome.runtime.getManifest();
+    return !('update_url' in manifest);
+  } catch {
+    return true;
+  }
+}
+
 // Password strength validation
 function validatePasswordStrength(password: string): string | null {
   if (password.length < 8) {
@@ -55,6 +83,17 @@ export function App() {
   const [issuer, setIssuer] = useState('');
   const [accountName, setAccountName] = useState('');
   const [secret, setSecret] = useState('');
+
+  // Proof status
+  const [proofStatus, setProofStatus] = useState<ProofStatus | null>(null);
+
+  // Pending auth requests (from dApps)
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [processingRequest, setProcessingRequest] = useState<string | null>(null);
+
+  // Provider preference (dev mode)
+  const [providerPreference, setProviderPreference] = useState<string | null>(null);
+  const [isDevMode] = useState(() => isDevelopment());
 
   useEffect(() => {
     checkVaultStatus();
@@ -149,6 +188,11 @@ export function App() {
         if (response.unlocked) {
           setState('unlocked');
           loadAccounts();
+          loadProofStatus();
+          loadPendingRequests();
+          if (isDevMode) {
+            loadProviderPreference();
+          }
         } else {
           setState('locked');
         }
@@ -169,6 +213,124 @@ export function App() {
       }
     } catch (err) {
       console.error('Failed to load accounts:', err);
+    }
+  }
+
+  async function loadProofStatus() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_PROOF_STATUS' });
+      if (response?.success && response.status) {
+        setProofStatus(response.status);
+      }
+    } catch (err) {
+      console.error('Failed to load proof status:', err);
+    }
+  }
+
+  async function loadPendingRequests() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_PENDING_REQUESTS' });
+      if (response?.success && response.requests) {
+        setPendingRequests(response.requests);
+      }
+    } catch (err) {
+      console.error('Failed to load pending requests:', err);
+    }
+  }
+
+  async function loadProviderPreference() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_PROVIDER_PREFERENCE' });
+      if (response?.success) {
+        setProviderPreference(response.provider);
+      }
+    } catch (err) {
+      console.error('Failed to load provider preference:', err);
+    }
+  }
+
+  async function handleProviderChange(provider: string | null) {
+    setProviderPreference(provider);
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'SET_PROVIDER_PREFERENCE',
+        provider,
+      });
+      // Reload status to reflect the change
+      loadProofStatus();
+    } catch (err) {
+      console.error('Failed to set provider preference:', err);
+    }
+  }
+
+  async function handleApproveRequest(requestId: string) {
+    setProcessingRequest(requestId);
+    setError(null);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'PROCESS_PENDING_REQUEST',
+        requestId,
+        approved: true,
+      });
+
+      if (response?.success) {
+        // Remove from local list
+        setPendingRequests(prev => prev.filter(r => r.requestId !== requestId));
+      } else {
+        setError(response?.error || 'Failed to process request');
+      }
+    } catch (err) {
+      setError('Failed to process request');
+    } finally {
+      setProcessingRequest(null);
+    }
+  }
+
+  async function handleDenyRequest(requestId: string) {
+    setProcessingRequest(requestId);
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'PROCESS_PENDING_REQUEST',
+        requestId,
+        approved: false,
+      });
+
+      // Remove from local list
+      setPendingRequests(prev => prev.filter(r => r.requestId !== requestId));
+    } catch (err) {
+      console.error('Failed to deny request:', err);
+    } finally {
+      setProcessingRequest(null);
+    }
+  }
+
+  // Get display name for proof provider
+  function getProviderDisplayName(provider: string | null): string {
+    switch (provider) {
+      case 'lace':
+        return 'Lace';
+      case 'http':
+        return 'Docker';
+      case 'mock':
+        return 'Mock';
+      default:
+        return 'None';
+    }
+  }
+
+  // Get badge color for proof provider
+  function getProviderBadgeClass(provider: string | null): string {
+    switch (provider) {
+      case 'lace':
+        return 'badge-lace';
+      case 'http':
+        return 'badge-docker';
+      case 'mock':
+        return 'badge-mock';
+      default:
+        return 'badge-none';
     }
   }
 
@@ -230,6 +392,11 @@ export function App() {
         setPassword('');
         setState('unlocked');
         loadAccounts();
+        loadProofStatus();
+        loadPendingRequests();
+        if (isDevMode) {
+          loadProviderPreference();
+        }
       } else {
         setError(response?.error || 'Incorrect password');
       }
@@ -457,15 +624,69 @@ export function App() {
     return code;
   }
 
+  // Get the account name for a pending request
+  function getAccountForRequest(accountId: string): Account | undefined {
+    return accounts.find(a => a.id === accountId);
+  }
+
   // List view (default)
   return (
     <div className="container">
       <div className="header">
         <h1>Midnight Authenticator</h1>
-        <button className="lock-button" onClick={handleLock} title="Lock vault">
-          Lock
-        </button>
+        <div className="header-actions">
+          {proofStatus && (
+            <span
+              className={`proof-badge ${getProviderBadgeClass(proofStatus.activeProvider)}`}
+              title={`Proof Provider: ${getProviderDisplayName(proofStatus.activeProvider)}`}
+            >
+              {getProviderDisplayName(proofStatus.activeProvider)}
+            </span>
+          )}
+          <button className="lock-button" onClick={handleLock} title="Lock vault">
+            Lock
+          </button>
+        </div>
       </div>
+
+      {/* Pending auth requests from dApps */}
+      {pendingRequests.length > 0 && (
+        <div className="pending-requests">
+          <h3>Pending Authentication Requests</h3>
+          {pendingRequests.map((request) => {
+            const account = getAccountForRequest(request.accountId);
+            const isProcessing = processingRequest === request.requestId;
+
+            return (
+              <div key={request.requestId} className="pending-request">
+                <div className="pending-info">
+                  <span className="pending-origin">{request.origin}</span>
+                  <span className="pending-account">
+                    {account ? `${account.issuer} - ${account.name}` : 'Unknown account'}
+                  </span>
+                </div>
+                <div className="pending-actions">
+                  <button
+                    className="approve-button"
+                    onClick={() => handleApproveRequest(request.requestId)}
+                    disabled={isProcessing}
+                  >
+                    {isProcessing ? '...' : 'Approve'}
+                  </button>
+                  <button
+                    className="deny-button"
+                    onClick={() => handleDenyRequest(request.requestId)}
+                    disabled={isProcessing}
+                  >
+                    Deny
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="accounts">
         {accounts.length === 0 ? (
           <p className="empty">No accounts yet. Add one to get started.</p>
@@ -531,6 +752,23 @@ export function App() {
       </div>
       <button onClick={() => setView('add')}>Add Account</button>
       {error && <p className="error" role="alert">{error}</p>}
+
+      {/* Provider toggle - dev mode only */}
+      {isDevMode && (
+        <div className="dev-footer">
+          <label htmlFor="provider-select">Provider:</label>
+          <select
+            id="provider-select"
+            value={providerPreference || 'auto'}
+            onChange={(e) => handleProviderChange(e.target.value === 'auto' ? null : e.target.value)}
+          >
+            <option value="auto">Auto (fallback chain)</option>
+            <option value="lace">Lace Wallet</option>
+            <option value="http">Docker Proof Server</option>
+            <option value="mock">Mock (dev only)</option>
+          </select>
+        </div>
+      )}
     </div>
   );
 }

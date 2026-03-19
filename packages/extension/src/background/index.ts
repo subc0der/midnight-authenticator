@@ -15,6 +15,14 @@ import {
 // Import pure circuits from compiled contract
 import { pureCircuits } from '@midnight-authenticator/contracts';
 
+// Import proof service
+import {
+  getProofService,
+  type ProofRequest,
+  type ProofResult,
+  type PendingAuthRequest,
+} from '../shared/proof/index.js';
+
 const storage = getEncryptedStorage();
 
 // Base32 alphabet for secret input (user convenience)
@@ -134,7 +142,109 @@ const INTERNAL_ONLY_MESSAGES = [
   'INIT_VAULT',
   'UNLOCK_VAULT',
   'LOCK_VAULT',
+  'GENERATE_AUTH_PROOF', // Proof generation requires vault access
 ];
+
+// Storage keys
+const PENDING_REQUESTS_KEY = 'pendingAuthRequests';
+const PROVIDER_PREFERENCE_KEY = 'preferredProofProvider';
+
+// Request expiration time (5 minutes)
+const REQUEST_EXPIRATION_MS = 5 * 60 * 1000;
+
+/**
+ * Generate a unique request ID.
+ */
+function generateRequestId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Store a pending auth request.
+ */
+async function storePendingRequest(request: {
+  requestId: string;
+  origin: string;
+  accountId: string;
+  challenge?: string;
+  tabId?: number;
+}): Promise<void> {
+  const now = Date.now();
+  const pending = {
+    ...request,
+    createdAt: now,
+    expiresAt: now + REQUEST_EXPIRATION_MS,
+    status: 'pending' as const,
+  };
+
+  const { [PENDING_REQUESTS_KEY]: existing = [] } = await chrome.storage.local.get(PENDING_REQUESTS_KEY);
+
+  // Filter out expired requests
+  const filtered = existing.filter((r: any) => r.expiresAt > now);
+  filtered.push(pending);
+
+  await chrome.storage.local.set({ [PENDING_REQUESTS_KEY]: filtered });
+}
+
+/**
+ * Get pending auth requests.
+ */
+async function getPendingRequests(): Promise<any[]> {
+  const { [PENDING_REQUESTS_KEY]: requests = [] } = await chrome.storage.local.get(PENDING_REQUESTS_KEY);
+  const now = Date.now();
+  return requests.filter((r: any) => r.expiresAt > now && r.status === 'pending');
+}
+
+/**
+ * Update a pending request's status.
+ */
+async function updatePendingRequest(requestId: string, update: { status: string; result?: any }): Promise<void> {
+  const { [PENDING_REQUESTS_KEY]: requests = [] } = await chrome.storage.local.get(PENDING_REQUESTS_KEY);
+
+  const updated = requests.map((r: any) =>
+    r.requestId === requestId ? { ...r, ...update } : r
+  );
+
+  await chrome.storage.local.set({ [PENDING_REQUESTS_KEY]: updated });
+}
+
+/**
+ * Clear completed/expired pending requests.
+ */
+async function cleanupPendingRequests(): Promise<void> {
+  const { [PENDING_REQUESTS_KEY]: requests = [] } = await chrome.storage.local.get(PENDING_REQUESTS_KEY);
+  const now = Date.now();
+
+  // Keep only pending requests that haven't expired
+  const filtered = requests.filter((r: any) =>
+    r.status === 'pending' && r.expiresAt > now
+  );
+
+  await chrome.storage.local.set({ [PENDING_REQUESTS_KEY]: filtered });
+}
+
+/**
+ * Open the extension popup.
+ */
+async function openPopup(): Promise<void> {
+  try {
+    // Chrome 116+ supports openPopup
+    if (chrome.action.openPopup) {
+      await chrome.action.openPopup();
+    }
+  } catch {
+    // Fallback: create a popup window
+    const popup = await chrome.windows.create({
+      url: chrome.runtime.getURL('popup.html'),
+      type: 'popup',
+      width: 400,
+      height: 600,
+      focused: true,
+    });
+    console.log('[Background] Opened popup window:', popup.id);
+  }
+}
 
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -154,7 +264,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  handleMessage(message, origin)
+  // Get tab ID for pending request tracking
+  const tabId = sender.tab?.id;
+
+  handleMessage(message, origin, tabId)
     .then(sendResponse)
     .catch((error) => {
       console.error('[Background] Error handling message:', error);
@@ -166,7 +279,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleMessage(
   message: { type: string; [key: string]: unknown },
-  origin: string
+  origin: string,
+  tabId?: number
 ): Promise<unknown> {
   switch (message.type) {
     case 'GET_VAULT_STATUS':
@@ -207,6 +321,42 @@ async function handleMessage(
         resetAutoLockTimer();
       }
       return { success: true };
+
+    case 'GET_PROOF_PROVIDER':
+      return getProofProvider();
+
+    case 'GENERATE_AUTH_PROOF':
+      return generateAuthProof(
+        message['accountId'] as string,
+        message['nonce'] as bigint | undefined,
+        message['expectedTimeWindow'] as bigint | undefined
+      );
+
+    case 'GET_PROOF_STATUS':
+      return getProofStatus();
+
+    case 'AUTH_REQUEST':
+      return handleAuthRequest(
+        message['accountId'] as string,
+        message['challenge'] as string | undefined,
+        origin,
+        tabId
+      );
+
+    case 'GET_PENDING_REQUESTS':
+      return getPendingAuthRequests();
+
+    case 'PROCESS_PENDING_REQUEST':
+      return processPendingRequest(
+        message['requestId'] as string,
+        message['approved'] as boolean
+      );
+
+    case 'SET_PROVIDER_PREFERENCE':
+      return setProviderPreference(message['provider'] as string | null);
+
+    case 'GET_PROVIDER_PREFERENCE':
+      return getProviderPreference();
 
     default:
       console.warn(`[Background] Unknown message type: ${message.type}`);
@@ -420,6 +570,347 @@ async function getAuthCode(
     return { success: false, error: (error as Error).message };
   }
 }
+
+// ─── Proof Generation Functions ─────────────────────────────────────────────
+
+/**
+ * Get the currently available proof provider.
+ */
+async function getProofProvider(): Promise<{
+  success: boolean;
+  provider?: string;
+  description?: string;
+  error?: string;
+}> {
+  try {
+    const proofService = getProofService();
+    const provider = await proofService.getAvailableProvider();
+
+    if (!provider) {
+      return {
+        success: false,
+        error: 'No proof provider available',
+      };
+    }
+
+    return {
+      success: true,
+      provider,
+      description: proofService.getProviderDescription(provider),
+    };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Get detailed proof service status.
+ */
+async function getProofStatus(): Promise<{
+  success: boolean;
+  status?: {
+    activeProvider: string | null;
+    proofServerAvailable: boolean;
+    laceAvailable: boolean;
+    mockEnabled: boolean;
+  };
+  error?: string;
+}> {
+  try {
+    const proofService = getProofService();
+    const status = await proofService.getStatus();
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Generate an authentication proof for an account.
+ *
+ * @param accountId - The account to authenticate
+ * @param nonce - Optional nonce (auto-generated if not provided)
+ * @param expectedTimeWindow - Optional time window (uses current if not provided)
+ */
+async function generateAuthProof(
+  accountId: string,
+  nonce?: bigint,
+  expectedTimeWindow?: bigint
+): Promise<{
+  success: boolean;
+  proof?: number[];
+  publicInputs?: {
+    accountId: number[];
+    nonce: string;
+    expectedTimeWindow: string;
+    result: boolean;
+  };
+  providerName?: string;
+  isMock?: boolean;
+  error?: string;
+}> {
+  if (!storage.isUnlocked()) {
+    return { success: false, error: 'Vault is locked' };
+  }
+
+  resetAutoLockTimer();
+
+  if (!accountId) {
+    return { success: false, error: 'Account ID required' };
+  }
+
+  try {
+    // Load account data
+    const data = await storage.load();
+    if (!data) {
+      return { success: false, error: 'No vault data' };
+    }
+
+    const encryptedAccount = data.accounts.find((a) => a.account.id === accountId);
+    if (!encryptedAccount) {
+      return { success: false, error: 'Account not found' };
+    }
+
+    // Decrypt secret and blinder
+    const secret = await storage.decryptField(encryptedAccount.encryptedSecret);
+    const blinder = await storage.decryptField(encryptedAccount.encryptedBlinder);
+
+    // Convert accountId from hex string to Uint8Array
+    const accountIdBytes = hexToBytes(accountId);
+    if (accountIdBytes.length !== 16) {
+      secret.fill(0);
+      blinder.fill(0);
+      return { success: false, error: 'Invalid account ID length' };
+    }
+
+    // Pad accountId to 32 bytes (contract expects Bytes<32>)
+    const accountId32 = new Uint8Array(32);
+    accountId32.set(accountIdBytes, 0);
+
+    // Use provided nonce or generate one based on timestamp
+    const finalNonce = nonce ?? BigInt(Date.now());
+
+    // Use provided time window or get current
+    const finalTimeWindow = expectedTimeWindow ?? getCurrentTimeWindow();
+
+    // Build proof request
+    const proofRequest: ProofRequest = {
+      accountId: accountId32,
+      nonce: finalNonce,
+      expectedTimeWindow: finalTimeWindow,
+      secret,
+      blinder,
+    };
+
+    // Generate proof
+    console.log('[Background] Generating auth proof...');
+    const proofService = getProofService();
+    const result = await proofService.generateProof(proofRequest);
+
+    // Zero out sensitive data
+    secret.fill(0);
+    blinder.fill(0);
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error,
+        providerName: result.providerName,
+      };
+    }
+
+    // Convert Uint8Arrays to regular arrays for JSON serialization
+    return {
+      success: true,
+      proof: result.proof ? Array.from(result.proof) : undefined,
+      publicInputs: result.publicInputs
+        ? {
+            accountId: Array.from(result.publicInputs.accountId),
+            nonce: result.publicInputs.nonce.toString(),
+            expectedTimeWindow: result.publicInputs.expectedTimeWindow.toString(),
+            result: result.publicInputs.result,
+          }
+        : undefined,
+      providerName: result.providerName,
+      isMock: result.isMock,
+    };
+  } catch (error) {
+    console.error('[Background] Failed to generate auth proof:', error);
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Handle authentication request from a dApp.
+ * This is the main entry point for ZK authentication.
+ *
+ * If the vault is locked, stores the request and opens the popup for unlock.
+ *
+ * @param accountId - The account to authenticate
+ * @param challenge - Optional challenge from the dApp
+ * @param origin - Origin of the requesting dApp
+ * @param tabId - Tab ID of the requesting page
+ */
+async function handleAuthRequest(
+  accountId: string,
+  challenge?: string,
+  origin?: string,
+  tabId?: number
+): Promise<{
+  success: boolean;
+  proof?: number[];
+  publicInputs?: {
+    accountId: number[];
+    nonce: string;
+    expectedTimeWindow: string;
+    result: boolean;
+  };
+  providerName?: string;
+  isMock?: boolean;
+  error?: string;
+  pendingRequestId?: string;
+}> {
+  console.log(`[Background] Auth request for account: ${accountId}, challenge: ${challenge || 'none'}, origin: ${origin}`);
+
+  // Check if vault is locked
+  if (!storage.isUnlocked()) {
+    // Store the pending request
+    const requestId = generateRequestId();
+    await storePendingRequest({
+      requestId,
+      origin: origin || 'unknown',
+      accountId,
+      challenge,
+      tabId,
+    });
+
+    console.log(`[Background] Vault locked - stored pending request: ${requestId}`);
+
+    // Open the popup for user to unlock
+    await openPopup();
+
+    // Return pending status - the dApp will need to poll or wait for completion
+    return {
+      success: false,
+      error: 'Extension is locked. Please unlock to continue.',
+      pendingRequestId: requestId,
+    };
+  }
+
+  // Vault is unlocked - generate proof directly
+  // TODO: Add user approval UI before auto-generating proof
+  return generateAuthProof(accountId);
+}
+
+/**
+ * Get pending auth requests (for popup to display).
+ */
+async function getPendingAuthRequests(): Promise<{
+  success: boolean;
+  requests?: any[];
+  error?: string;
+}> {
+  try {
+    const requests = await getPendingRequests();
+    return { success: true, requests };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Process a pending auth request (approve or deny).
+ */
+async function processPendingRequest(
+  requestId: string,
+  approved: boolean
+): Promise<{
+  success: boolean;
+  proof?: number[];
+  publicInputs?: {
+    accountId: number[];
+    nonce: string;
+    expectedTimeWindow: string;
+    result: boolean;
+  };
+  providerName?: string;
+  isMock?: boolean;
+  error?: string;
+}> {
+  if (!storage.isUnlocked()) {
+    return { success: false, error: 'Vault is locked' };
+  }
+
+  const { [PENDING_REQUESTS_KEY]: requests = [] } = await chrome.storage.local.get(PENDING_REQUESTS_KEY);
+  const request = requests.find((r: any) => r.requestId === requestId);
+
+  if (!request) {
+    return { success: false, error: 'Request not found or expired' };
+  }
+
+  if (!approved) {
+    await updatePendingRequest(requestId, { status: 'denied' });
+    return { success: false, error: 'Request denied by user' };
+  }
+
+  // Generate proof
+  const result = await generateAuthProof(request.accountId);
+
+  // Update request status
+  await updatePendingRequest(requestId, {
+    status: result.success ? 'completed' : 'error',
+    result,
+  });
+
+  // Notify the requesting tab if we have its ID
+  if (request.tabId) {
+    try {
+      await chrome.tabs.sendMessage(request.tabId, {
+        type: 'AUTH_REQUEST_COMPLETED',
+        requestId,
+        result,
+      });
+    } catch {
+      // Tab may have been closed
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Set the preferred proof provider (dev mode feature).
+ */
+async function setProviderPreference(provider: string | null): Promise<{ success: boolean }> {
+  if (provider === null) {
+    await chrome.storage.local.remove(PROVIDER_PREFERENCE_KEY);
+  } else {
+    await chrome.storage.local.set({ [PROVIDER_PREFERENCE_KEY]: provider });
+  }
+  return { success: true };
+}
+
+/**
+ * Get the preferred proof provider.
+ */
+async function getProviderPreference(): Promise<{ success: boolean; provider: string | null }> {
+  const { [PROVIDER_PREFERENCE_KEY]: provider = null } = await chrome.storage.local.get(PROVIDER_PREFERENCE_KEY);
+  return { success: true, provider };
+}
+
+/**
+ * Convert hex string to Uint8Array.
+ */
+function hexToBytes(hex: string): Uint8Array {
+  const cleanHex = hex.replace(/^0x/, '');
+  const bytes = new Uint8Array(cleanHex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(cleanHex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+// ─── Auto-Lock Timer ────────────────────────────────────────────────────────
 
 // Auto-lock after 5 minutes of inactivity
 function resetAutoLockTimer(): void {

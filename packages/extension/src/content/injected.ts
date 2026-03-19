@@ -8,15 +8,82 @@
  */
 
 const INJECTED_EXTENSION_ID = 'midnight-authenticator';
-// SECURITY: Only message types that require user approval popup are allowed.
+// SECURITY: Only safe message types are allowed from dApps.
+// Proof-related operations that don't expose secrets are safe.
 // GET_ACCOUNTS removed - was a privacy leak (any site could enumerate user's accounts)
 // See: subcoder/gemini/REVIEW_FEEDBACK.md - Critical Issue #2
 const ALLOWED_MESSAGE_TYPES = [
-  'AUTH_REQUEST',      // Requires popup approval
-  'REGISTER_ACCOUNT',  // Requires popup approval
+  'AUTH_REQUEST',       // Requires popup approval
+  'REGISTER_ACCOUNT',   // Requires popup approval
+  'GET_PROOF_PROVIDER', // Safe - only returns provider name
+  'GET_PROOF_STATUS',   // Safe - returns availability status
 ] as const;
 
 type AllowedMessageType = typeof ALLOWED_MESSAGE_TYPES[number];
+
+// Pending Lace check requests (waiting for page context response)
+const pendingLaceChecks = new Map<string, (response: { laceAvailable: boolean; proverUri?: string }) => void>();
+
+// Listen for Lace status from page context
+window.addEventListener('message', (event) => {
+  if (event.origin !== window.location.origin) return;
+
+  const message = event.data;
+  if (!message || message.source !== `${INJECTED_EXTENSION_ID}-page`) return;
+
+  if (message.type === 'LACE_STATUS_RESPONSE') {
+    const callback = pendingLaceChecks.get(message.requestId);
+    if (callback) {
+      pendingLaceChecks.delete(message.requestId);
+      callback({
+        laceAvailable: message.laceAvailable,
+        proverUri: message.proverUri,
+      });
+    }
+  }
+});
+
+// Listen for messages from background (for Lace detection and auth completion)
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'CHECK_LACE_AVAILABLE') {
+    // Ask page context to check for Lace (content script can't see page's window.midnight)
+    const requestId = `lace-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    // Set up response handler
+    const timeoutId = setTimeout(() => {
+      pendingLaceChecks.delete(requestId);
+      sendResponse({ laceAvailable: false });
+    }, 1000);
+
+    pendingLaceChecks.set(requestId, (response) => {
+      clearTimeout(timeoutId);
+      sendResponse(response);
+    });
+
+    // Ask page context
+    window.postMessage({
+      type: 'CHECK_LACE_STATUS',
+      source: `${INJECTED_EXTENSION_ID}-content`,
+      requestId,
+    }, window.location.origin);
+
+    return true; // Keep channel open for async response
+  }
+
+  // Relay auth completion from background to page
+  if (message.type === 'AUTH_REQUEST_COMPLETED') {
+    window.postMessage({
+      type: 'AUTH_REQUEST_COMPLETED',
+      source: INJECTED_EXTENSION_ID,
+      requestId: message.requestId,
+      payload: message.result,
+    }, window.location.origin);
+    sendResponse({ received: true });
+    return true;
+  }
+
+  return false;
+});
 
 // Listen for messages from page
 window.addEventListener('message', async (event) => {
