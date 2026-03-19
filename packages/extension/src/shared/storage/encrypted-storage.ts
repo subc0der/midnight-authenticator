@@ -16,6 +16,8 @@ export interface Account {
   name: string;
   issuer: string;
   commitment: string;
+  /** Hash algorithm version for commitment. 1 = SHA-256. Future: 2 = Poseidon, etc. */
+  commitmentVersion: number;
   createdAt: number;
   lastUsedAt?: number;
 }

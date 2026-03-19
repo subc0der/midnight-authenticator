@@ -68,6 +68,16 @@ async function computeCommitment(
   return toHex(new Uint8Array(hash));
 }
 
+// Internal-only message types that should never come from content scripts or dApps
+const INTERNAL_ONLY_MESSAGES = [
+  'ADD_ACCOUNT',
+  'DELETE_ACCOUNT',
+  'GET_ACCOUNTS',
+  'INIT_VAULT',
+  'UNLOCK_VAULT',
+  'LOCK_VAULT',
+];
+
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Ignore messages meant for offscreen document
@@ -77,6 +87,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Get trusted origin from sender, not message payload
   const origin = sender.origin || (sender.url ? new URL(sender.url).origin : 'unknown');
+
+  // Security: Block internal-only messages from non-extension origins
+  // (Gemini Review #3: Origin Lockdown)
+  const isInternal = origin.startsWith(`chrome-extension://${chrome.runtime.id}`);
+  if (!isInternal && INTERNAL_ONLY_MESSAGES.includes(message.type)) {
+    console.warn(`[Background] Blocked ${message.type} from unauthorized origin: ${origin}`);
+    sendResponse({ success: false, error: 'Unauthorized' });
+    return true;
+  }
 
   handleMessage(message, origin)
     .then(sendResponse)
@@ -225,6 +244,7 @@ async function addAccount(
       name: name.trim(),
       issuer: issuer.trim(),
       commitment,
+      commitmentVersion: 1, // 1 = SHA-256. Future versions: 2 = Poseidon, etc.
       createdAt: Date.now(),
     };
 
