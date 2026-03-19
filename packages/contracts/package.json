@@ -3,11 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "scripts": {
-    "compile": "bash scripts/compile.sh",
-    "clean": "rimraf src/managed"
+    "compile": "wsl -e bash -c \"source ~/.local/bin/env && cd /mnt/c/Users/mkhal/dev/midnight-authenticator/packages/contracts && compact compile src/totp-verifier.compact src/managed/totp-verifier\"",
+    "build": "tsc",
+    "clean": "rimraf dist src/managed",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.14.0",
+    "@midnight-ntwrk/midnight-js-types": "3.1.0"
   },
   "devDependencies": {
-    "rimraf": "^5.0.0"
+    "rimraf": "^5.0.0",
+    "typescript": "^5.4.0"
   }
 }

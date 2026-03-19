@@ -15,10 +15,23 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rimraf dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@midnight-authenticator/contracts": "workspace:*",
+    "@midnight-ntwrk/compact-runtime": "0.14.0",
+    "@midnight-ntwrk/midnight-js-contracts": "3.1.0",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "3.1.0",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "3.1.0",
+    "@midnight-ntwrk/midnight-js-network-id": "3.1.0",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "3.1.0",
+    "@midnight-ntwrk/midnight-js-types": "3.1.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "rimraf": "^5.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.8"
   }
 }

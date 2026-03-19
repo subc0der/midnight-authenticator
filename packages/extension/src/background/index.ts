@@ -55,14 +55,17 @@ function toHex(bytes: Uint8Array): string {
  * HMAC-SHA1 using Web Crypto API
  */
 async function hmacSha1(key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+  // Copy to new ArrayBuffer to avoid SharedArrayBuffer type issues
+  const keyBuffer = new Uint8Array(key).buffer as ArrayBuffer;
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    key,
+    keyBuffer,
     { name: 'HMAC', hash: 'SHA-1' },
     false,
     ['sign']
   );
-  const signature = await crypto.subtle.sign('HMAC', cryptoKey, message);
+  const msgBuffer = new Uint8Array(message).buffer as ArrayBuffer;
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgBuffer);
   return new Uint8Array(signature);
 }
 
