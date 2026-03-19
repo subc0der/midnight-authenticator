@@ -67,14 +67,29 @@ h1 {
 
 .account-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
+  flex-direction: column;
   border-bottom: 1px solid #2d2d44;
 }
 
 .account-item:last-child {
   border-bottom: none;
+}
+
+.account-item.expanded {
+  background: #1e1e38;
+}
+
+.account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.account-header:hover {
+  background: rgba(99, 102, 241, 0.05);
 }
 
 .account-info {
@@ -194,4 +209,82 @@ input:focus {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* TOTP Display */
+.totp-display {
+  padding: 16px;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid #2d2d44;
+}
+
+.totp-code {
+  font-size: 32px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  color: #818cf8;
+  text-align: center;
+  letter-spacing: 4px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.totp-code:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.totp-code:active {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.totp-code.copied {
+  color: #22c55e;
+  font-size: 18px;
+  letter-spacing: normal;
+}
+
+.totp-timer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.timer-bar-container {
+  flex: 1;
+  height: 4px;
+  background: #2d2d44;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.timer-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  border-radius: 2px;
+  transition: width 0.3s ease-out;
+}
+
+.timer-text {
+  font-size: 12px;
+  color: #64748b;
+  min-width: 28px;
+  text-align: right;
+}
+
+.timer-text {
+  font-size: 12px;
+  color: #64748b;
+  min-width: 24px;
+  text-align: right;
+}
+
+.totp-loading {
+  text-align: center;
+  color: #64748b;
+  padding: 16px;
 }

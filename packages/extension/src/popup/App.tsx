@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 type AppState = 'loading' | 'locked' | 'unlocked' | 'setup';
 type UnlockedView = 'list' | 'add';
@@ -10,6 +10,11 @@ interface Account {
   commitment: string;
   createdAt: number;
   lastUsedAt?: number;
+}
+
+interface TotpCode {
+  code: string;
+  remainingSeconds: number;
 }
 
 // Password strength validation
@@ -42,6 +47,9 @@ export function App() {
 
   // Account state
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [totpCodes, setTotpCodes] = useState<Record<string, TotpCode>>({});
+  const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
+  const [copiedAccount, setCopiedAccount] = useState<string | null>(null);
 
   // Add account form state
   const [issuer, setIssuer] = useState('');
@@ -66,6 +74,73 @@ export function App() {
 
     return () => clearInterval(keepAlive);
   }, [state]);
+
+  // Fetch TOTP code for an account
+  const fetchTotpCode = useCallback(async (accountId: string) => {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'GET_TOTP_CODE',
+        accountId,
+      });
+
+      if (response?.success) {
+        setTotpCodes((prev) => ({
+          ...prev,
+          [accountId]: {
+            code: response.code,
+            remainingSeconds: response.remainingSeconds,
+          },
+        }));
+      } else if (response?.error === 'Vault is locked') {
+        setState('locked');
+        setError('Session expired. Please unlock again.');
+      }
+    } catch (err) {
+      console.error('Failed to fetch TOTP code:', err);
+    }
+  }, []);
+
+  // Countdown timer - updates every second
+  useEffect(() => {
+    if (state !== 'unlocked' || Object.keys(totpCodes).length === 0) return;
+
+    const timer = setInterval(() => {
+      setTotpCodes((prev) => {
+        const updated: Record<string, TotpCode> = {};
+        let needsRefresh = false;
+
+        for (const [accountId, totp] of Object.entries(prev)) {
+          if (totp.remainingSeconds <= 1) {
+            needsRefresh = true;
+            // Will be refreshed by the refresh effect
+            updated[accountId] = { ...totp, remainingSeconds: 0 };
+          } else {
+            updated[accountId] = { ...totp, remainingSeconds: totp.remainingSeconds - 1 };
+          }
+        }
+
+        return updated;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [state, Object.keys(totpCodes).length]);
+
+  // Refresh codes when they expire
+  useEffect(() => {
+    for (const [accountId, totp] of Object.entries(totpCodes)) {
+      if (totp.remainingSeconds === 0) {
+        fetchTotpCode(accountId);
+      }
+    }
+  }, [totpCodes, fetchTotpCode]);
+
+  // Fetch code when account is expanded
+  useEffect(() => {
+    if (expandedAccount && !totpCodes[expandedAccount]) {
+      fetchTotpCode(expandedAccount);
+    }
+  }, [expandedAccount, fetchTotpCode, totpCodes]);
 
   async function checkVaultStatus() {
     try {
@@ -351,6 +426,37 @@ export function App() {
     );
   }
 
+  // Toggle account expansion and fetch code
+  function handleAccountClick(accountId: string) {
+    if (expandedAccount === accountId) {
+      setExpandedAccount(null);
+    } else {
+      setExpandedAccount(accountId);
+      if (!totpCodes[accountId]) {
+        fetchTotpCode(accountId);
+      }
+    }
+  }
+
+  // Copy code to clipboard
+  async function handleCopyCode(code: string, accountId: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedAccount(accountId);
+      setTimeout(() => setCopiedAccount(null), 1500);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  }
+
+  // Format code with space in middle (e.g., "123 456")
+  function formatCode(code: string): string {
+    if (code.length === 6) {
+      return `${code.slice(0, 3)} ${code.slice(3)}`;
+    }
+    return code;
+  }
+
   // List view (default)
   return (
     <div className="container">
@@ -364,21 +470,63 @@ export function App() {
         {accounts.length === 0 ? (
           <p className="empty">No accounts yet. Add one to get started.</p>
         ) : (
-          accounts.map((account) => (
-            <div key={account.id} className="account-item">
-              <div className="account-info">
-                <span className="account-issuer">{account.issuer}</span>
-                <span className="account-name">{account.name}</span>
-              </div>
-              <button
-                className="delete-button"
-                onClick={() => handleDeleteAccount(account.id)}
-                title="Delete account"
+          accounts.map((account) => {
+            const isExpanded = expandedAccount === account.id;
+            const totp = totpCodes[account.id];
+
+            return (
+              <div
+                key={account.id}
+                className={`account-item ${isExpanded ? 'expanded' : ''}`}
               >
-                x
-              </button>
-            </div>
-          ))
+                <div
+                  className="account-header"
+                  onClick={() => handleAccountClick(account.id)}
+                >
+                  <div className="account-info">
+                    <span className="account-issuer">{account.issuer}</span>
+                    <span className="account-name">{account.name}</span>
+                  </div>
+                  <button
+                    className="delete-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteAccount(account.id);
+                    }}
+                    title="Delete account"
+                  >
+                    x
+                  </button>
+                </div>
+                {isExpanded && (
+                  <div className="totp-display">
+                    {totp ? (
+                      <>
+                        <div
+                          className={`totp-code ${copiedAccount === account.id ? 'copied' : ''}`}
+                          onClick={() => handleCopyCode(totp.code, account.id)}
+                          title="Click to copy"
+                        >
+                          {copiedAccount === account.id ? 'Copied!' : formatCode(totp.code)}
+                        </div>
+                        <div className="totp-timer">
+                          <div className="timer-bar-container">
+                            <div
+                              className="timer-bar"
+                              style={{ width: `${(totp.remainingSeconds / 30) * 100}%` }}
+                            />
+                          </div>
+                          <span className="timer-text">{totp.remainingSeconds}s</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="totp-loading">Loading...</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
       <button onClick={() => setView('add')}>Add Account</button>

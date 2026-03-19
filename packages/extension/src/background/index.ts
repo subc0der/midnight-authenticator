@@ -52,6 +52,62 @@ function toHex(bytes: Uint8Array): string {
 }
 
 /**
+ * HMAC-SHA1 using Web Crypto API
+ */
+async function hmacSha1(key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, message);
+  return new Uint8Array(signature);
+}
+
+/**
+ * Generate TOTP code per RFC 6238
+ * @param secret - The shared secret (decoded from base32)
+ * @param timeStep - Time step in seconds (default 30)
+ * @param digits - Number of digits (default 6)
+ */
+async function generateTOTP(
+  secret: Uint8Array,
+  timeStep = 30,
+  digits = 6
+): Promise<{ code: string; remainingSeconds: number }> {
+  const now = Math.floor(Date.now() / 1000);
+  const counter = Math.floor(now / timeStep);
+  const remainingSeconds = timeStep - (now % timeStep);
+
+  // Convert counter to 8-byte big-endian buffer
+  const counterBuffer = new Uint8Array(8);
+  let temp = counter;
+  for (let i = 7; i >= 0; i--) {
+    counterBuffer[i] = temp & 0xff;
+    temp = Math.floor(temp / 256);
+  }
+
+  // HMAC-SHA1(secret, counter)
+  const hmac = await hmacSha1(secret, counterBuffer);
+
+  // Dynamic truncation per RFC 4226
+  const offset = hmac[19]! & 0x0f;
+  const binary =
+    ((hmac[offset]! & 0x7f) << 24) |
+    ((hmac[offset + 1]! & 0xff) << 16) |
+    ((hmac[offset + 2]! & 0xff) << 8) |
+    (hmac[offset + 3]! & 0xff);
+
+  // Generate digits
+  const otp = binary % Math.pow(10, digits);
+  const code = otp.toString().padStart(digits, '0');
+
+  return { code, remainingSeconds };
+}
+
+/**
  * Compute commitment from secret and blinder
  * MVP: SHA-256(secret || blinder)
  * Future: Use ZK-friendly hash (Poseidon, etc.)
@@ -73,6 +129,7 @@ const INTERNAL_ONLY_MESSAGES = [
   'ADD_ACCOUNT',
   'DELETE_ACCOUNT',
   'GET_ACCOUNTS',
+  'GET_TOTP_CODE',
   'INIT_VAULT',
   'UNLOCK_VAULT',
   'LOCK_VAULT',
@@ -136,6 +193,9 @@ async function handleMessage(
 
     case 'DELETE_ACCOUNT':
       return deleteAccount(message['accountId'] as string);
+
+    case 'GET_TOTP_CODE':
+      return getTotpCode(message['accountId'] as string);
 
     case 'KEEPALIVE':
       // Ping to keep SW alive while popup is open
@@ -305,6 +365,47 @@ async function deleteAccount(
     return { success: true };
   } catch (error) {
     console.error('[Background] Failed to delete account:', error);
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+async function getTotpCode(
+  accountId: string
+): Promise<{ success: boolean; code?: string; remainingSeconds?: number; error?: string }> {
+  if (!storage.isUnlocked()) {
+    return { success: false, error: 'Vault is locked' };
+  }
+
+  // Reset auto-lock timer on activity
+  resetAutoLockTimer();
+
+  if (!accountId) {
+    return { success: false, error: 'Account ID required' };
+  }
+
+  try {
+    const data = await storage.load();
+    if (!data) {
+      return { success: false, error: 'No vault data' };
+    }
+
+    const encryptedAccount = data.accounts.find((a) => a.account.id === accountId);
+    if (!encryptedAccount) {
+      return { success: false, error: 'Account not found' };
+    }
+
+    // Decrypt the secret
+    const secret = await storage.decryptField(encryptedAccount.encryptedSecret);
+
+    // Generate TOTP code
+    const { code, remainingSeconds } = await generateTOTP(secret);
+
+    // Zero out the secret buffer to minimize memory exposure
+    secret.fill(0);
+
+    return { success: true, code, remainingSeconds };
+  } catch (error) {
+    console.error('[Background] Failed to generate TOTP:', error);
     return { success: false, error: (error as Error).message };
   }
 }
