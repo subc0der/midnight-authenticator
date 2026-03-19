@@ -12,7 +12,7 @@ interface Account {
   lastUsedAt?: number;
 }
 
-interface TotpCode {
+interface ZkAuthCode {
   code: string;
   remainingSeconds: number;
 }
@@ -47,7 +47,7 @@ export function App() {
 
   // Account state
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [totpCodes, setTotpCodes] = useState<Record<string, TotpCode>>({});
+  const [authCodes, setAuthCodes] = useState<Record<string, ZkAuthCode>>({});
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
   const [copiedAccount, setCopiedAccount] = useState<string | null>(null);
 
@@ -76,15 +76,15 @@ export function App() {
   }, [state]);
 
   // Fetch TOTP code for an account
-  const fetchTotpCode = useCallback(async (accountId: string) => {
+  const fetchAuthCode = useCallback(async (accountId: string) => {
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'GET_TOTP_CODE',
+        type: 'GET_AUTH_CODE',
         accountId,
       });
 
       if (response?.success) {
-        setTotpCodes((prev) => ({
+        setAuthCodes((prev) => ({
           ...prev,
           [accountId]: {
             code: response.code,
@@ -102,20 +102,20 @@ export function App() {
 
   // Countdown timer - updates every second
   useEffect(() => {
-    if (state !== 'unlocked' || Object.keys(totpCodes).length === 0) return;
+    if (state !== 'unlocked' || Object.keys(authCodes).length === 0) return;
 
     const timer = setInterval(() => {
-      setTotpCodes((prev) => {
-        const updated: Record<string, TotpCode> = {};
+      setAuthCodes((prev) => {
+        const updated: Record<string, ZkAuthCode> = {};
         let needsRefresh = false;
 
-        for (const [accountId, totp] of Object.entries(prev)) {
-          if (totp.remainingSeconds <= 1) {
+        for (const [accountId, authCode] of Object.entries(prev)) {
+          if (authCode.remainingSeconds <= 1) {
             needsRefresh = true;
             // Will be refreshed by the refresh effect
-            updated[accountId] = { ...totp, remainingSeconds: 0 };
+            updated[accountId] = { ...authCode, remainingSeconds: 0 };
           } else {
-            updated[accountId] = { ...totp, remainingSeconds: totp.remainingSeconds - 1 };
+            updated[accountId] = { ...authCode, remainingSeconds: authCode.remainingSeconds - 1 };
           }
         }
 
@@ -124,23 +124,23 @@ export function App() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [state, Object.keys(totpCodes).length]);
+  }, [state, Object.keys(authCodes).length]);
 
   // Refresh codes when they expire
   useEffect(() => {
-    for (const [accountId, totp] of Object.entries(totpCodes)) {
-      if (totp.remainingSeconds === 0) {
-        fetchTotpCode(accountId);
+    for (const [accountId, authCode] of Object.entries(authCodes)) {
+      if (authCode.remainingSeconds === 0) {
+        fetchAuthCode(accountId);
       }
     }
-  }, [totpCodes, fetchTotpCode]);
+  }, [authCodes, fetchAuthCode]);
 
   // Fetch code when account is expanded
   useEffect(() => {
-    if (expandedAccount && !totpCodes[expandedAccount]) {
-      fetchTotpCode(expandedAccount);
+    if (expandedAccount && !authCodes[expandedAccount]) {
+      fetchAuthCode(expandedAccount);
     }
-  }, [expandedAccount, fetchTotpCode, totpCodes]);
+  }, [expandedAccount, fetchAuthCode, authCodes]);
 
   async function checkVaultStatus() {
     try {
@@ -432,8 +432,8 @@ export function App() {
       setExpandedAccount(null);
     } else {
       setExpandedAccount(accountId);
-      if (!totpCodes[accountId]) {
-        fetchTotpCode(accountId);
+      if (!authCodes[accountId]) {
+        fetchAuthCode(accountId);
       }
     }
   }
@@ -472,7 +472,7 @@ export function App() {
         ) : (
           accounts.map((account) => {
             const isExpanded = expandedAccount === account.id;
-            const totp = totpCodes[account.id];
+            const code = authCodes[account.id];
 
             return (
               <div
@@ -499,28 +499,28 @@ export function App() {
                   </button>
                 </div>
                 {isExpanded && (
-                  <div className="totp-display">
-                    {totp ? (
+                  <div className="auth-code-display">
+                    {code ? (
                       <>
                         <div
-                          className={`totp-code ${copiedAccount === account.id ? 'copied' : ''}`}
-                          onClick={() => handleCopyCode(totp.code, account.id)}
+                          className={`auth-code ${copiedAccount === account.id ? 'copied' : ''}`}
+                          onClick={() => handleCopyCode(code.code, account.id)}
                           title="Click to copy"
                         >
-                          {copiedAccount === account.id ? 'Copied!' : formatCode(totp.code)}
+                          {copiedAccount === account.id ? 'Copied!' : formatCode(code.code)}
                         </div>
-                        <div className="totp-timer">
+                        <div className="auth-timer">
                           <div className="timer-bar-container">
                             <div
                               className="timer-bar"
-                              style={{ width: `${(totp.remainingSeconds / 30) * 100}%` }}
+                              style={{ width: `${(code.remainingSeconds / 30) * 100}%` }}
                             />
                           </div>
-                          <span className="timer-text">{totp.remainingSeconds}s</span>
+                          <span className="timer-text">{code.remainingSeconds}s</span>
                         </div>
                       </>
                     ) : (
-                      <div className="totp-loading">Loading...</div>
+                      <div className="auth-loading">Loading...</div>
                     )}
                   </div>
                 )}

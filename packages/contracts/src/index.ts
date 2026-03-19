@@ -1,19 +1,26 @@
 /**
  * @midnight-authenticator/contracts
  *
- * Compact smart contracts for Midnight Authenticator ZK TOTP.
+ * Compact smart contracts for Midnight Authenticator ZK authentication.
+ *
+ * This is a ZK-native authenticator using Midnight's persistentHash.
+ * It is NOT RFC 6238 TOTP compatible.
  *
  * After compilation with `pnpm compile`, import the generated TypeScript API from:
  * - ./managed/totp-verifier/contract
  */
 
-// Re-export contract module
+// Re-export contract module and pure circuits
 export * as TotpVerifier from './managed/totp-verifier/contract/index.js';
+export { pureCircuits } from './managed/totp-verifier/contract/index.js';
+
+// Re-export witnesses
+export * from './totp-verifier-witnesses.js';
 
 // Contract addresses (populated after deployment)
 export const CONTRACT_ADDRESSES = {
   preprod: {
-    totpVerifier: '',
+    totpVerifier: '02b3255950655d5c3f2695692e8135c1c4119240c64a6abfe92bdafbc1751d66',
   },
   mainnet: {
     totpVerifier: '',

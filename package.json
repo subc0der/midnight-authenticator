@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:contracts": "pnpm --filter @midnight-authenticator/contracts compile && pnpm --filter @midnight-authenticator/contracts build",
+    "deploy": "pnpm --filter @midnight-authenticator/deploy-cli deploy",
     "dev": "pnpm -r --parallel dev",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
@@ -20,7 +21,9 @@
   },
   "pnpm": {
     "overrides": {
-      "smoldot": "npm:@aspect-build/empty@0.0.0"
+      "smoldot": "npm:empty-npm-package@1.0.0",
+      "@midnight-ntwrk/ledger-v7": "7.0.2",
+      "@midnight-ntwrk/compact-js": "2.4.3"
     }
   },
   "engines": {

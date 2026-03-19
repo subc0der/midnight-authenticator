@@ -211,8 +211,8 @@ input:focus {
   to { transform: rotate(360deg); }
 }
 
-/* TOTP Display */
-.totp-display {
+/* ZK Auth Code Display */
+.auth-code-display {
   padding: 16px;
   padding-top: 8px;
   display: flex;
@@ -221,7 +221,7 @@ input:focus {
   border-top: 1px solid #2d2d44;
 }
 
-.totp-code {
+.auth-code {
   font-size: 32px;
   font-weight: 700;
   font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
@@ -234,21 +234,21 @@ input:focus {
   transition: background 0.15s;
 }
 
-.totp-code:hover {
+.auth-code:hover {
   background: rgba(99, 102, 241, 0.1);
 }
 
-.totp-code:active {
+.auth-code:active {
   background: rgba(99, 102, 241, 0.2);
 }
 
-.totp-code.copied {
+.auth-code.copied {
   color: #22c55e;
   font-size: 18px;
   letter-spacing: normal;
 }
 
-.totp-timer {
+.auth-timer {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -272,18 +272,11 @@ input:focus {
 .timer-text {
   font-size: 12px;
   color: #64748b;
-  min-width: 28px;
-  text-align: right;
-}
-
-.timer-text {
-  font-size: 12px;
-  color: #64748b;
   min-width: 24px;
   text-align: right;
 }
 
-.totp-loading {
+.auth-loading {
   text-align: center;
   color: #64748b;
   padding: 16px;

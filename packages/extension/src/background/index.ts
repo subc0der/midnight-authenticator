@@ -1,6 +1,9 @@
 /**
  * Background Service Worker
- * Handles message routing, vault management, and proof generation.
+ * Handles message routing, vault management, and ZK auth code generation.
+ *
+ * NOTE: This is a ZK-native authenticator using Midnight's persistentHash.
+ * It is NOT RFC 6238 TOTP compatible. Codes will differ from standard authenticators.
  */
 
 import {
@@ -9,13 +12,16 @@ import {
   EncryptedAccount,
 } from '../shared/storage/encrypted-storage';
 
+// Import pure circuits from compiled contract
+import { pureCircuits } from '@midnight-authenticator/contracts';
+
 const storage = getEncryptedStorage();
 
-// Base32 alphabet for TOTP secrets
+// Base32 alphabet for secret input (user convenience)
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /**
- * Decode base32 string to Uint8Array (for TOTP secrets)
+ * Decode base32 string to Uint8Array
  */
 function fromBase32(base32: string): Uint8Array {
   const cleaned = base32.replace(/\s/g, '').toUpperCase().replace(/=+$/, '');
@@ -52,68 +58,60 @@ function toHex(bytes: Uint8Array): string {
 }
 
 /**
- * HMAC-SHA1 using Web Crypto API
+ * Normalize secret to 32 bytes for contract compatibility.
+ * Uses SHA-256 hash of input to produce consistent 32-byte output.
  */
-async function hmacSha1(key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
-  // Copy to new ArrayBuffer to avoid SharedArrayBuffer type issues
-  const keyBuffer = new Uint8Array(key).buffer as ArrayBuffer;
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    keyBuffer,
-    { name: 'HMAC', hash: 'SHA-1' },
-    false,
-    ['sign']
-  );
-  const msgBuffer = new Uint8Array(message).buffer as ArrayBuffer;
-  const signature = await crypto.subtle.sign('HMAC', cryptoKey, msgBuffer);
-  return new Uint8Array(signature);
+async function normalizeSecretTo32Bytes(secret: Uint8Array): Promise<Uint8Array> {
+  const buffer = new Uint8Array(secret).buffer as ArrayBuffer;
+  const hash = await crypto.subtle.digest('SHA-256', buffer);
+  return new Uint8Array(hash);
 }
 
 /**
- * Generate TOTP code per RFC 6238
- * @param secret - The shared secret (decoded from base32)
- * @param timeStep - Time step in seconds (default 30)
- * @param digits - Number of digits (default 6)
+ * Get current time window (30-second intervals since Unix epoch)
  */
-async function generateTOTP(
-  secret: Uint8Array,
-  timeStep = 30,
-  digits = 6
-): Promise<{ code: string; remainingSeconds: number }> {
+function getCurrentTimeWindow(): bigint {
+  return BigInt(Math.floor(Date.now() / 1000 / 30));
+}
+
+/**
+ * Get remaining seconds in current time window
+ */
+function getRemainingSeconds(): number {
   const now = Math.floor(Date.now() / 1000);
-  const counter = Math.floor(now / timeStep);
-  const remainingSeconds = timeStep - (now % timeStep);
+  return 30 - (now % 30);
+}
 
-  // Convert counter to 8-byte big-endian buffer
-  const counterBuffer = new Uint8Array(8);
-  let temp = counter;
-  for (let i = 7; i >= 0; i--) {
-    counterBuffer[i] = temp & 0xff;
-    temp = Math.floor(temp / 256);
-  }
+/**
+ * Generate ZK auth code using contract's pure circuit.
+ * This uses Midnight's persistentHash - NOT HMAC-SHA1.
+ *
+ * @param secret - 32-byte secret (normalized)
+ * @returns 6-digit code and remaining seconds
+ */
+function generateZkAuthCode(
+  secret: Uint8Array
+): { code: string; remainingSeconds: number } {
+  const timeWindow = getCurrentTimeWindow();
+  const remainingSeconds = getRemainingSeconds();
 
-  // HMAC-SHA1(secret, counter)
-  const hmac = await hmacSha1(secret, counterBuffer);
+  // Use contract's pure circuit for hash computation
+  // pureCircuits.computeAuthCode expects Bytes<32> and bigint
+  const hash = pureCircuits.computeAuthCode(secret, timeWindow);
 
-  // Dynamic truncation per RFC 4226
-  const offset = hmac[19]! & 0x0f;
-  const binary =
-    ((hmac[offset]! & 0x7f) << 24) |
-    ((hmac[offset + 1]! & 0xff) << 16) |
-    ((hmac[offset + 2]! & 0xff) << 8) |
-    (hmac[offset + 3]! & 0xff);
-
-  // Generate digits
-  const otp = binary % Math.pow(10, digits);
-  const code = otp.toString().padStart(digits, '0');
+  // Truncate hash to 6 digits (similar to TOTP dynamic truncation)
+  // Use first 4 bytes as a 32-bit integer, mod 10^6
+  const view = new DataView(hash.buffer, hash.byteOffset, 4);
+  const binary = view.getUint32(0, false) & 0x7fffffff; // Big-endian, clear sign bit
+  const otp = binary % 1000000;
+  const code = otp.toString().padStart(6, '0');
 
   return { code, remainingSeconds };
 }
 
 /**
- * Compute commitment from secret and blinder
- * MVP: SHA-256(secret || blinder)
- * Future: Use ZK-friendly hash (Poseidon, etc.)
+ * Compute commitment from secret and blinder using SHA-256.
+ * Note: This is for local storage. On-chain uses persistentCommit.
  */
 async function computeCommitment(
   secret: Uint8Array,
@@ -132,7 +130,7 @@ const INTERNAL_ONLY_MESSAGES = [
   'ADD_ACCOUNT',
   'DELETE_ACCOUNT',
   'GET_ACCOUNTS',
-  'GET_TOTP_CODE',
+  'GET_AUTH_CODE',
   'INIT_VAULT',
   'UNLOCK_VAULT',
   'LOCK_VAULT',
@@ -149,7 +147,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const origin = sender.origin || (sender.url ? new URL(sender.url).origin : 'unknown');
 
   // Security: Block internal-only messages from non-extension origins
-  // (Gemini Review #3: Origin Lockdown)
   const isInternal = origin.startsWith(`chrome-extension://${chrome.runtime.id}`);
   if (!isInternal && INTERNAL_ONLY_MESSAGES.includes(message.type)) {
     console.warn(`[Background] Blocked ${message.type} from unauthorized origin: ${origin}`);
@@ -197,8 +194,12 @@ async function handleMessage(
     case 'DELETE_ACCOUNT':
       return deleteAccount(message['accountId'] as string);
 
+    case 'GET_AUTH_CODE':
+      return getAuthCode(message['accountId'] as string);
+
+    // Legacy support - redirect to new message type
     case 'GET_TOTP_CODE':
-      return getTotpCode(message['accountId'] as string);
+      return getAuthCode(message['accountId'] as string);
 
     case 'KEEPALIVE':
       // Ping to keep SW alive while popup is open
@@ -293,7 +294,10 @@ async function addAccount(
     const data = (await storage.load()) || { accounts: [] };
 
     // Decode secret from base32
-    const secret = fromBase32(cleanedSecret);
+    const rawSecret = fromBase32(cleanedSecret);
+
+    // Normalize to 32 bytes for contract compatibility
+    const secret = await normalizeSecretTo32Bytes(rawSecret);
 
     // Generate random blinder (32 bytes)
     const blinder = crypto.getRandomValues(new Uint8Array(32));
@@ -302,7 +306,7 @@ async function addAccount(
     const idBytes = crypto.getRandomValues(new Uint8Array(16));
     const id = toHex(idBytes);
 
-    // Compute commitment
+    // Compute commitment (for local reference)
     const commitment = await computeCommitment(secret, blinder);
 
     // Encrypt secret and blinder separately
@@ -314,7 +318,7 @@ async function addAccount(
       name: name.trim(),
       issuer: issuer.trim(),
       commitment,
-      commitmentVersion: 1, // 1 = SHA-256. Future versions: 2 = Poseidon, etc.
+      commitmentVersion: 2, // Version 2 = ZK-native (persistentHash), not RFC 6238
       createdAt: Date.now(),
     };
 
@@ -372,7 +376,7 @@ async function deleteAccount(
   }
 }
 
-async function getTotpCode(
+async function getAuthCode(
   accountId: string
 ): Promise<{ success: boolean; code?: string; remainingSeconds?: number; error?: string }> {
   if (!storage.isUnlocked()) {
@@ -397,18 +401,18 @@ async function getTotpCode(
       return { success: false, error: 'Account not found' };
     }
 
-    // Decrypt the secret
+    // Decrypt the secret (already 32 bytes from addAccount)
     const secret = await storage.decryptField(encryptedAccount.encryptedSecret);
 
-    // Generate TOTP code
-    const { code, remainingSeconds } = await generateTOTP(secret);
+    // Generate ZK auth code using contract's pure circuit
+    const { code, remainingSeconds } = generateZkAuthCode(secret);
 
     // Zero out the secret buffer to minimize memory exposure
     secret.fill(0);
 
     return { success: true, code, remainingSeconds };
   } catch (error) {
-    console.error('[Background] Failed to generate TOTP:', error);
+    console.error('[Background] Failed to generate auth code:', error);
     return { success: false, error: (error as Error).message };
   }
 }
@@ -425,4 +429,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-console.log('[Background] Midnight Authenticator service worker started');
+console.log('[Background] Midnight Authenticator service worker started (ZK-native mode)');
