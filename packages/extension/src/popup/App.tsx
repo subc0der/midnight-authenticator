@@ -107,7 +107,9 @@ export function App() {
       if (response?.success) {
         setPassword('');
         setConfirmPassword('');
-        setState('unlocked');
+        // Transition to locked state so user enters password again
+        // This ensures the encryption key is fresh in SW memory
+        setState('locked');
       } else {
         setError(response?.error || 'Failed to create vault');
       }
@@ -178,6 +180,11 @@ export function App() {
         setSecret('');
         setView('list');
         loadAccounts();
+      } else if (response?.error === 'Vault is locked') {
+        // SW lost the key - redirect to unlock
+        setState('locked');
+        setView('list');
+        setError('Session expired. Please unlock again.');
       } else {
         setError(response?.error || 'Failed to add account');
       }
@@ -203,6 +210,9 @@ export function App() {
 
       if (response?.success) {
         loadAccounts();
+      } else if (response?.error === 'Vault is locked') {
+        setState('locked');
+        setError('Session expired. Please unlock again.');
       } else {
         setError(response?.error || 'Failed to delete account');
       }

@@ -163,6 +163,9 @@ async function getAccounts(): Promise<{ success: boolean; accounts?: Account[]; 
     return { success: false, error: 'Vault is locked' };
   }
 
+  // Reset auto-lock timer on activity
+  resetAutoLockTimer();
+
   try {
     const data = await storage.load();
     // Return only the Account metadata, not encrypted fields
@@ -181,6 +184,9 @@ async function addAccount(
   if (!storage.isUnlocked()) {
     return { success: false, error: 'Vault is locked' };
   }
+
+  // Reset auto-lock timer on activity
+  resetAutoLockTimer();
 
   // Input validation
   if (!issuer?.trim() || !name?.trim() || !secretBase32?.trim()) {
@@ -245,6 +251,9 @@ async function deleteAccount(
   if (!storage.isUnlocked()) {
     return { success: false, error: 'Vault is locked' };
   }
+
+  // Reset auto-lock timer on activity
+  resetAutoLockTimer();
 
   if (!accountId) {
     return { success: false, error: 'Account ID required' };
