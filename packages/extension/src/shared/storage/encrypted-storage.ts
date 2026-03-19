@@ -10,8 +10,8 @@
  * - Encryption key held in memory only, never persisted
  */
 
-// Types imported locally to avoid build issues with workspace packages
-interface Account {
+// Types exported for use in background and popup
+export interface Account {
   id: string;
   name: string;
   issuer: string;
@@ -20,7 +20,7 @@ interface Account {
   lastUsedAt?: number;
 }
 
-interface EncryptedAccount {
+export interface EncryptedAccount {
   account: Account;
   encryptedSecret: string;
   encryptedBlinder: string;
@@ -298,6 +298,50 @@ export class EncryptedStorage {
 
     const decoder = new TextDecoder();
     return JSON.parse(decoder.decode(plaintext));
+  }
+
+  /**
+   * Encrypt a single field (for secret/blinder)
+   */
+  async encryptField(data: Uint8Array): Promise<string> {
+    if (!this.encryptionKey) {
+      throw new Error('Vault is locked');
+    }
+
+    const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      this.encryptionKey,
+      data.buffer as ArrayBuffer
+    );
+
+    const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(ciphertext), iv.length);
+
+    return uint8ArrayToBase64(combined);
+  }
+
+  /**
+   * Decrypt a single field
+   */
+  async decryptField(encrypted: string): Promise<Uint8Array> {
+    if (!this.encryptionKey) {
+      throw new Error('Vault is locked');
+    }
+
+    const combined = base64ToUint8Array(encrypted);
+    const iv = combined.slice(0, IV_LENGTH);
+    const ciphertext = combined.slice(IV_LENGTH);
+
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      this.encryptionKey,
+      ciphertext
+    );
+
+    return new Uint8Array(plaintext);
   }
 }
 

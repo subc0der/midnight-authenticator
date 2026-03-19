@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from 'react';
 
 type AppState = 'loading' | 'locked' | 'unlocked' | 'setup';
+type UnlockedView = 'list' | 'add';
 
-// Password strength validation (Gemini Review #2: Medium Priority)
+interface Account {
+  id: string;
+  name: string;
+  issuer: string;
+  commitment: string;
+  createdAt: number;
+  lastUsedAt?: number;
+}
+
+// Password strength validation
 function validatePasswordStrength(password: string): string | null {
   if (password.length < 8) {
     return 'Password must be at least 8 characters';
@@ -19,15 +29,24 @@ function validatePasswordStrength(password: string): string | null {
     return 'Password must include at least 2 of: lowercase, uppercase, numbers, special characters';
   }
 
-  return null; // Password is valid
+  return null;
 }
 
 export function App() {
   const [state, setState] = useState<AppState>('loading');
+  const [view, setView] = useState<UnlockedView>('list');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Account state
+  const [accounts, setAccounts] = useState<Account[]>([]);
+
+  // Add account form state
+  const [issuer, setIssuer] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [secret, setSecret] = useState('');
 
   useEffect(() => {
     checkVaultStatus();
@@ -37,13 +56,29 @@ export function App() {
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_VAULT_STATUS' });
       if (response?.exists) {
-        setState(response.unlocked ? 'unlocked' : 'locked');
+        if (response.unlocked) {
+          setState('unlocked');
+          loadAccounts();
+        } else {
+          setState('locked');
+        }
       } else {
         setState('setup');
       }
     } catch (err) {
       setError('Failed to connect to extension');
       setState('setup');
+    }
+  }
+
+  async function loadAccounts() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_ACCOUNTS' });
+      if (response?.success) {
+        setAccounts(response.accounts || []);
+      }
+    } catch (err) {
+      console.error('Failed to load accounts:', err);
     }
   }
 
@@ -102,6 +137,7 @@ export function App() {
       if (response?.success) {
         setPassword('');
         setState('unlocked');
+        loadAccounts();
       } else {
         setError(response?.error || 'Incorrect password');
       }
@@ -114,7 +150,65 @@ export function App() {
 
   async function handleLock() {
     await chrome.runtime.sendMessage({ type: 'LOCK_VAULT' });
+    setAccounts([]);
     setState('locked');
+  }
+
+  async function handleAddAccount() {
+    setError(null);
+
+    if (!issuer.trim() || !accountName.trim() || !secret.trim()) {
+      setError('All fields are required');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'ADD_ACCOUNT',
+        issuer: issuer.trim(),
+        name: accountName.trim(),
+        secret: secret.trim(),
+      });
+
+      if (response?.success) {
+        setIssuer('');
+        setAccountName('');
+        setSecret('');
+        setView('list');
+        loadAccounts();
+      } else {
+        setError(response?.error || 'Failed to add account');
+      }
+    } catch (err) {
+      setError('Failed to add account');
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleDeleteAccount(accountId: string) {
+    if (!window.confirm('Delete this account? This cannot be undone.')) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DELETE_ACCOUNT',
+        accountId,
+      });
+
+      if (response?.success) {
+        loadAccounts();
+      } else {
+        setError(response?.error || 'Failed to delete account');
+      }
+    } catch (err) {
+      setError('Failed to delete account');
+    }
   }
 
   if (state === 'loading') {
@@ -182,6 +276,57 @@ export function App() {
     );
   }
 
+  // Unlocked state - show list or add form
+  if (view === 'add') {
+    return (
+      <div className="container">
+        <div className="header">
+          <button className="back-button" onClick={() => { setView('list'); setError(null); }}>
+            Back
+          </button>
+          <h1>Add Account</h1>
+        </div>
+        <input
+          type="text"
+          placeholder="Issuer (e.g., GitHub)"
+          value={issuer}
+          onChange={(e) => setIssuer(e.target.value)}
+          disabled={isProcessing}
+        />
+        <input
+          type="text"
+          placeholder="Account name (e.g., user@example.com)"
+          value={accountName}
+          onChange={(e) => setAccountName(e.target.value)}
+          disabled={isProcessing}
+        />
+        <input
+          type="text"
+          placeholder="Secret key (base32)"
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          disabled={isProcessing}
+        />
+        <button
+          onClick={handleAddAccount}
+          disabled={isProcessing}
+          aria-busy={isProcessing}
+        >
+          {isProcessing ? 'Adding...' : 'Add Account'}
+        </button>
+        <button
+          className="secondary-button"
+          onClick={() => { setView('list'); setError(null); }}
+          disabled={isProcessing}
+        >
+          Cancel
+        </button>
+        {error && <p className="error" role="alert">{error}</p>}
+      </div>
+    );
+  }
+
+  // List view (default)
   return (
     <div className="container">
       <div className="header">
@@ -190,11 +335,28 @@ export function App() {
           Lock
         </button>
       </div>
-      <p className="status">Ready</p>
       <div className="accounts">
-        <p className="empty">No accounts yet. Add one to get started.</p>
+        {accounts.length === 0 ? (
+          <p className="empty">No accounts yet. Add one to get started.</p>
+        ) : (
+          accounts.map((account) => (
+            <div key={account.id} className="account-item">
+              <div className="account-info">
+                <span className="account-issuer">{account.issuer}</span>
+                <span className="account-name">{account.name}</span>
+              </div>
+              <button
+                className="delete-button"
+                onClick={() => handleDeleteAccount(account.id)}
+                title="Delete account"
+              >
+                x
+              </button>
+            </div>
+          ))
+        )}
       </div>
-      <button>Add Account</button>
+      <button onClick={() => setView('add')}>Add Account</button>
       {error && <p className="error" role="alert">{error}</p>}
     </div>
   );

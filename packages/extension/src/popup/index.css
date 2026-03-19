@@ -55,14 +55,84 @@ h1 {
   background: #1a1a2e;
   border: 1px solid #2d2d44;
   border-radius: 8px;
-  padding: 16px;
   min-height: 200px;
+  overflow: hidden;
 }
 
 .empty {
   color: #64748b;
   text-align: center;
-  padding: 40px 0;
+  padding: 40px 16px;
+}
+
+.account-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2d2d44;
+}
+
+.account-item:last-child {
+  border-bottom: none;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-issuer {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-size: 14px;
+}
+
+.account-name {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.delete-button {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 18px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.delete-button:hover {
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+}
+
+.back-button {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.back-button:hover {
+  color: #e2e8f0;
+  background: transparent;
+}
+
+.secondary-button {
+  background: transparent;
+  border: 1px solid #3f3f5a;
+  color: #94a3b8;
+}
+
+.secondary-button:hover {
+  background: #1a1a2e;
+  color: #e2e8f0;
 }
 
 button {
