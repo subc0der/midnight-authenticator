@@ -2,6 +2,26 @@ import React, { useState, useEffect } from 'react';
 
 type AppState = 'loading' | 'locked' | 'unlocked' | 'setup';
 
+// Password strength validation (Gemini Review #2: Medium Priority)
+function validatePasswordStrength(password: string): string | null {
+  if (password.length < 8) {
+    return 'Password must be at least 8 characters';
+  }
+
+  const hasLower = /[a-z]/.test(password);
+  const hasUpper = /[A-Z]/.test(password);
+  const hasDigit = /[0-9]/.test(password);
+  const hasSpecial = /[^a-zA-Z0-9]/.test(password);
+
+  const typesPresent = [hasLower, hasUpper, hasDigit, hasSpecial].filter(Boolean).length;
+
+  if (typesPresent < 2) {
+    return 'Password must include at least 2 of: lowercase, uppercase, numbers, special characters';
+  }
+
+  return null; // Password is valid
+}
+
 export function App() {
   const [state, setState] = useState<AppState>('loading');
   const [password, setPassword] = useState('');
@@ -30,8 +50,9 @@ export function App() {
   async function handleCreateVault() {
     setError(null);
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    const strengthError = validatePasswordStrength(password);
+    if (strengthError) {
+      setError(strengthError);
       return;
     }
 

@@ -29,6 +29,27 @@ interface EncryptedAccount {
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 
+// Robust base64 encoding/decoding for binary data
+// (Gemini Review #2: Medium Priority - Base64 Encoding Implementation)
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000; // Process in chunks to avoid call stack issues
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export interface VaultData {
   accounts: EncryptedAccount[];
   settings?: {
@@ -69,26 +90,47 @@ async function ensureOffscreenDocument(): Promise<void> {
   console.log('[EncryptedStorage] Offscreen document created');
 }
 
+async function closeOffscreenDocument(): Promise<void> {
+  if (!offscreenCreated) {
+    return;
+  }
+
+  try {
+    await chrome.offscreen.closeDocument();
+    offscreenCreated = false;
+    console.log('[EncryptedStorage] Offscreen document closed');
+  } catch (err) {
+    // Document may already be closed
+    offscreenCreated = false;
+  }
+}
+
 async function deriveKeyViaOffscreen(password: string, salt: Uint8Array): Promise<Uint8Array> {
   await ensureOffscreenDocument();
 
   console.log('[EncryptedStorage] Sending DERIVE_KEY to offscreen...');
 
-  const response = await chrome.runtime.sendMessage({
-    type: 'DERIVE_KEY',
-    password,
-    salt: Array.from(salt),
-  });
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'DERIVE_KEY',
+      password,
+      salt: Array.from(salt),
+    });
 
-  if (!response) {
-    throw new Error('Key derivation failed - no response from offscreen');
+    if (!response) {
+      throw new Error('Key derivation failed - no response from offscreen');
+    }
+
+    if (!response.success) {
+      throw new Error(response.error || 'Key derivation failed');
+    }
+
+    return new Uint8Array(response.keyBytes);
+  } finally {
+    // Close offscreen document after use to reduce attack surface
+    // (Gemini Review #2: High Priority - Offscreen Document Persistence)
+    await closeOffscreenDocument();
   }
-
-  if (!response.success) {
-    throw new Error(response.error || 'Key derivation failed');
-  }
-
-  return new Uint8Array(response.keyBytes);
 }
 
 export class EncryptedStorage {
@@ -232,7 +274,7 @@ export class EncryptedStorage {
     combined.set(iv, 0);
     combined.set(new Uint8Array(ciphertext), iv.length);
 
-    return btoa(String.fromCharCode(...combined));
+    return uint8ArrayToBase64(combined);
   }
 
   /**
@@ -243,11 +285,7 @@ export class EncryptedStorage {
       throw new Error('No encryption key');
     }
 
-    const combined = new Uint8Array(
-      atob(encryptedData)
-        .split('')
-        .map((c) => c.charCodeAt(0))
-    );
+    const combined = base64ToUint8Array(encryptedData);
 
     const iv = combined.slice(0, IV_LENGTH);
     const ciphertext = combined.slice(IV_LENGTH);
