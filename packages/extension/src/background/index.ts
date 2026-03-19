@@ -137,6 +137,13 @@ async function handleMessage(
     case 'DELETE_ACCOUNT':
       return deleteAccount(message['accountId'] as string);
 
+    case 'KEEPALIVE':
+      // Ping to keep SW alive while popup is open
+      if (storage.isUnlocked()) {
+        resetAutoLockTimer();
+      }
+      return { success: true };
+
     default:
       console.warn(`[Background] Unknown message type: ${message.type}`);
       return { success: false, error: 'Unknown message type' };

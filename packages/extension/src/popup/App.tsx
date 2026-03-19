@@ -52,6 +52,21 @@ export function App() {
     checkVaultStatus();
   }, []);
 
+  // Keep service worker alive while popup is open and vault is unlocked
+  // This prevents the SW from going dormant and losing the encryption key
+  useEffect(() => {
+    if (state !== 'unlocked') return;
+
+    const keepAlive = setInterval(() => {
+      chrome.runtime.sendMessage({ type: 'KEEPALIVE' }).catch(() => {
+        // SW may have died, check status
+        checkVaultStatus();
+      });
+    }, 20000); // Ping every 20 seconds (SW dies at ~30s)
+
+    return () => clearInterval(keepAlive);
+  }, [state]);
+
   async function checkVaultStatus() {
     try {
       const response = await chrome.runtime.sendMessage({ type: 'GET_VAULT_STATUS' });
