@@ -19,6 +19,8 @@ export interface Config {
   readonly indexerWS: string;
   readonly node: string;
   readonly proofServer: string;
+  /** Fee overhead for dust wallet. Preprod uses high value; tune down for mainnet. */
+  readonly additionalFeeOverhead: bigint;
 }
 
 export class PreprodConfig implements Config {
@@ -26,6 +28,8 @@ export class PreprodConfig implements Config {
   indexerWS = 'wss://indexer.preprod.midnight.network/api/v3/graphql/ws';
   node = 'https://rpc.preprod.midnight.network';
   proofServer = 'http://127.0.0.1:6300';
+  // High fee overhead for preprod - tune down significantly for mainnet
+  additionalFeeOverhead = 300_000_000_000_000n;
 
   constructor() {
     setNetworkId('preprod');

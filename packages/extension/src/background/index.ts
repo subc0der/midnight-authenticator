@@ -302,9 +302,13 @@ async function addAccount(
     // Generate random blinder (32 bytes)
     const blinder = crypto.getRandomValues(new Uint8Array(32));
 
-    // Generate account ID (16 bytes)
-    const idBytes = crypto.getRandomValues(new Uint8Array(16));
-    const id = toHex(idBytes);
+    // Generate unique account ID (16 bytes)
+    // Collision probability is astronomically low (1/2^128), but check anyway for safety
+    let id: string;
+    do {
+      const idBytes = crypto.getRandomValues(new Uint8Array(16));
+      id = toHex(idBytes);
+    } while (data.accounts.some((a) => a.account.id === id));
 
     // Compute commitment (for local reference)
     const commitment = await computeCommitment(secret, blinder);

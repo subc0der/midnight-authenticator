@@ -63,14 +63,28 @@ export interface WalletContext {
 
 const formatBalance = (balance: bigint): string => balance.toLocaleString();
 
-export const withStatus = async <T>(message: string, fn: () => Promise<T>): Promise<T> => {
+/**
+ * Display spinner while executing an async operation.
+ * Includes a 10-minute timeout to prevent hanging in CI/CD environments.
+ */
+export const withStatus = async <T>(
+  message: string,
+  fn: () => Promise<T>,
+  timeoutMs = 10 * 60 * 1000, // 10 minutes default
+): Promise<T> => {
   const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let i = 0;
   const interval = setInterval(() => {
     process.stdout.write(`\r  ${frames[i++ % frames.length]} ${message}`);
   }, 80);
+
+  // Create timeout promise to prevent indefinite hangs
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs / 1000}s: ${message}`)), timeoutMs);
+  });
+
   try {
-    const result = await fn();
+    const result = await Promise.race([fn(), timeoutPromise]);
     clearInterval(interval);
     process.stdout.write(`\r  ✓ ${message}\n`);
     return result;
@@ -207,6 +221,13 @@ const buildShieldedConfig = ({ indexer, indexerWS, node, proofServer }: Config) 
   relayURL: new URL(node.replace(/^http/, 'ws')),
 });
 
+/**
+ * Build unshielded wallet config.
+ *
+ * WARNING: InMemoryTransactionHistoryStorage is CLI-only. Do NOT reuse this config
+ * in browser extensions - MV3 service workers go dormant, losing in-memory state.
+ * Use chrome.storage-backed implementation for extensions.
+ */
 const buildUnshieldedConfig = ({ indexer, indexerWS }: Config) => ({
   networkId: getNetworkId(),
   indexerClientConnection: {
@@ -216,10 +237,10 @@ const buildUnshieldedConfig = ({ indexer, indexerWS }: Config) => ({
   txHistoryStorage: new InMemoryTransactionHistoryStorage(),
 });
 
-const buildDustConfig = ({ indexer, indexerWS, node, proofServer }: Config) => ({
+const buildDustConfig = ({ indexer, indexerWS, node, proofServer, additionalFeeOverhead }: Config) => ({
   networkId: getNetworkId(),
   costParameters: {
-    additionalFeeOverhead: 300_000_000_000_000n,
+    additionalFeeOverhead,
     feeBlocksMargin: 5,
   },
   indexerClientConnection: {

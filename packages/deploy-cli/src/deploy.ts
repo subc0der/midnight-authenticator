@@ -197,14 +197,21 @@ async function main() {
     success(`Deployment result saved to ${resultPath}`);
 
     // Update contract addresses in index.ts
+    // Use regex that matches any existing value (empty or hex string) for redeployment support
     const indexPath = path.join(PROJECT_ROOT, 'packages/contracts/src/index.ts');
     let indexContent = fs.readFileSync(indexPath, 'utf-8');
-    indexContent = indexContent.replace(
-      /totpVerifier: ''/,
-      `totpVerifier: '${contractAddress}'`
-    );
-    fs.writeFileSync(indexPath, indexContent);
-    success('Updated CONTRACT_ADDRESSES in packages/contracts/src/index.ts');
+    const addressRegex = /totpVerifier: '[^']*'/;
+    if (!addressRegex.test(indexContent)) {
+      error('Could not find totpVerifier address field in index.ts');
+      info('Ensure packages/contracts/src/index.ts contains: totpVerifier: \'\'');
+    } else {
+      indexContent = indexContent.replace(
+        addressRegex,
+        `totpVerifier: '${contractAddress}'`
+      );
+      fs.writeFileSync(indexPath, indexContent);
+      success('Updated CONTRACT_ADDRESSES in packages/contracts/src/index.ts');
+    }
 
     // Cleanup
     await walletCtx.wallet.stop();
