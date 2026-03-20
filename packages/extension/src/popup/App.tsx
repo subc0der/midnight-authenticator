@@ -721,6 +721,10 @@ export function App() {
                 <div
                   className="account-header"
                   onClick={() => handleAccountClick(account.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleAccountClick(account.id); } }}
+                  tabIndex={0}
+                  role="button"
+                  aria-expanded={isExpanded}
                 >
                   <div className="account-info">
                     <span className="account-issuer">{account.issuer}</span>
@@ -744,6 +748,9 @@ export function App() {
                         <div
                           className={`auth-code ${copiedAccount === account.id ? 'copied' : ''}`}
                           onClick={() => handleCopyCode(code.code, account.id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopyCode(code.code, account.id); } }}
+                          tabIndex={0}
+                          role="button"
                           title="Click to copy"
                         >
                           {copiedAccount === account.id ? 'Copied!' : formatCode(code.code)}
@@ -761,6 +768,9 @@ export function App() {
                         <div
                           className={`account-id ${copiedAccountId === account.id ? 'copied' : ''}`}
                           onClick={() => handleCopyAccountId(account.id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopyAccountId(account.id); } }}
+                          tabIndex={0}
+                          role="button"
                           title="Click to copy Account ID (for dApp integration)"
                         >
                           {copiedAccountId === account.id ? 'ID Copied!' : `ID: ${formatAccountId(account.id)}`}
