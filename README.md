@@ -2,11 +2,13 @@
 
 > Built on the [Midnight Network](https://midnight.network)
 
-Zero-knowledge authenticator for the Midnight blockchain.
+**Zero-knowledge TOTP authenticator for the Midnight blockchain.**
 
-**Prove you have the right code without showing it.**
+*Prove you have the right code without showing it.*
 
-Midnight Authenticator enables users to prove they possess a valid authentication code without revealing the underlying secret or the code itself. It's privacy-preserving 2FA that doesn't leak secrets to verifiers.
+Midnight Authenticator enables users to prove they possess a valid authentication code without revealing the underlying secret or the code itself. Unlike traditional 2FA where codes are transmitted in plaintext, this authenticator replaces codes with zero-knowledge proofs—privacy-preserving 2FA that doesn't leak secrets to verifiers.
+
+**Contract deployed on Preprod:** [`02b325...1d66`](https://preprod.midnightexplorer.io/contract/02b3255950655d5c3f2695692e8135c1c4119240c64a6abfe92bdafbc1751d66)
 
 ## Important: ZK-Native Protocol
 
@@ -23,15 +25,27 @@ Codes displayed in this app will **NOT match** standard authenticators like Goog
 
 ## Status
 
-**Phase 4: ZK Integration** - Active Development
+**Phase 4: ZK Integration** - Mainnet Ready
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Compact Contract | Compiled | `totp-verifier.compact` with 3 circuits |
-| TypeScript Bindings | Generated | Full type-safe API |
-| Chrome Extension | MVP | Encrypted vault, ZK code generation |
-| Proof Server | Running | Docker container on port 6300 |
-| Preprod Deployment | Pending | Next milestone |
+| Compact Contract | ✅ Deployed | `totp-verifier.compact` on preprod |
+| TypeScript Bindings | ✅ Generated | Full type-safe API |
+| Chrome Extension | ✅ MVP Complete | Encrypted vault, ZK code generation |
+| Proof Provider | ✅ Architecture Ready | Lace wallet integration for mainnet |
+| Security Reviews | ✅ 7 Reviews | All issues addressed |
+
+### Proof Generation
+
+The extension supports multiple proof providers with automatic fallback:
+
+| Provider | Environment | Status |
+|----------|-------------|--------|
+| **Lace Wallet** | Mainnet | Ready (activates at mainnet) |
+| Docker Proof Server | Development | Available locally |
+| Mock Proofs | Development | For testing only |
+
+At mainnet, users with Lace wallet will automatically use Midnight's hosted proof servers—no Docker required.
 
 ## Features
 
@@ -170,9 +184,19 @@ The `totp-verifier.compact` contract provides:
 | Smart Contracts | Compact (Midnight ZK language) |
 | Extension | React + Vite, Chrome MV3 |
 | Encryption | Argon2id + AES-256-GCM |
-| ZK Proofs | Midnight proof server |
+| ZK Proofs | Midnight proof server (via Lace or Docker) |
 | Code Generation | `persistentHash` (ZK-friendly) |
-| Network | Midnight Preprod (Mainnet planned) |
+| Network | Midnight Preprod → Mainnet |
+
+### SDK Versions
+
+| Package | Version |
+|---------|---------|
+| `@midnight-ntwrk/compact-runtime` | 0.14.0 |
+| `@midnight-ntwrk/midnight-js-contracts` | 3.1.0 |
+| `@midnight-ntwrk/ledger-v7` | 7.0.2 |
+| Proof Server | 7.0.0 |
+| Compact CLI | 0.4.0+ |
 
 ## Project Structure
 
@@ -217,37 +241,86 @@ pnpm test
 
 ## Roadmap
 
-1. **Phase 1: Research & Foundation** - Complete
-   - ZK-compatible approach using `persistentHash`
-   - Circuit architecture design
-   - Monorepo setup
+### Completed
 
-2. **Phase 2: Core Circuits** - Complete
-   - `totp-verifier.compact` with security reviews
-   - Compact CLI compilation
-   - TypeScript bindings
+- [x] **Phase 1: Research & Foundation**
+  - ZK-compatible approach using `persistentHash`
+  - Circuit architecture design
+  - Monorepo setup
 
-3. **Phase 3: Extension MVP** - Complete
-   - Encrypted vault
-   - ZK auth code generation
-   - Account management UI
+- [x] **Phase 2: Core Circuits**
+  - `totp-verifier.compact` with 7 security reviews
+  - Compact CLI compilation (3 circuits)
+  - TypeScript bindings generated
 
-4. **Phase 4: ZK Integration** - In Progress
-   - Deploy to Preprod
-   - Real ZK proof generation
-   - Demo verifier dApp
+- [x] **Phase 3: Extension MVP**
+  - Encrypted vault (Argon2id + AES-256-GCM)
+  - ZK auth code generation via pure circuits
+  - Account management UI with auto-lock
 
-5. **Phase 5: Production**
-   - QR code scanning
-   - Security audit
-   - Mainnet deployment
-   - Chrome Web Store submission
+- [x] **Phase 4: ZK Integration**
+  - Contract deployed to preprod
+  - Proof provider architecture (Lace, Docker, Mock)
+  - Vault-locked authentication flow
+  - Demo verifier dApp
+
+### In Progress
+
+- [ ] **Phase 5: Production**
+  - QR code scanning for secret import
+  - Mainnet deployment (pending mainnet launch)
+  - Chrome Web Store submission
+
+## Demo dApp
+
+A demo verifier application is included to test the authentication flow:
+
+```bash
+cd apps/demo
+pnpm dev
+```
+
+1. Open the demo at `http://localhost:5173`
+2. Add an account in the extension
+3. Copy the Account ID from the extension (click the ID below the code)
+4. Paste into the demo and click "Request Authentication"
+5. Approve in the extension popup
+6. See the ZK proof result
+
+## Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Demo dApp     │────▶│    Extension    │────▶│  Proof Server   │
+│  (Verifier)     │     │  (Prover/User)  │     │  (Lace/Docker)  │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       │                       │
+        │  AUTH_REQUEST         │  Generate ZK Proof    │
+        │◀──────────────────────│◀──────────────────────│
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Midnight Network (Preprod)                    │
+│            Contract: 02b3255950655d5c3f2695692e8135...          │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Resources
 
 - [Midnight Developer Docs](https://docs.midnight.network/develop/tutorial)
 - [Compact Language](https://docs.midnight.network/develop/tutorial/high-level-arch)
 - [Midnight Releases](https://releases.midnight.network/)
+- [Preprod Explorer](https://preprod.midnightexplorer.io/)
+
+## Contributing
+
+Contributions welcome! Please read the security notes in `.claude/context/security-learnings.md` before contributing security-sensitive code.
+
+This project has undergone 7 security-focused code reviews. Key patterns:
+- All auth requests require explicit user approval (no silent proof generation)
+- Secrets zeroed after use (`secret.fill(0)`)
+- Origin validation via `sender.origin`, not message payload
+- Keyboard accessibility for all interactive elements
 
 ## License
 
