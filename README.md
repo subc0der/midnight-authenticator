@@ -10,6 +10,12 @@ Midnight Authenticator enables users to prove they possess a valid authenticatio
 
 **Contract deployed on Preprod:** [`02b325...1d66`](https://preprod.midnightexplorer.io/contract/02b3255950655d5c3f2695692e8135c1c4119240c64a6abfe92bdafbc1751d66)
 
+## Screenshots
+
+| Extension | Demo dApp |
+|-----------|-----------|
+| ![Extension](Extension.png) | ![Demo App](DemoApp.png) |
+
 ## Important: ZK-Native Protocol
 
 This authenticator uses Midnight's `persistentHash` for code generation, making it a **ZK-native protocol**. It is **NOT RFC 6238 (TOTP) compatible**.
