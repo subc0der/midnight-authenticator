@@ -78,6 +78,7 @@ export function App() {
   const [authCodes, setAuthCodes] = useState<Record<string, ZkAuthCode>>({});
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
   const [copiedAccount, setCopiedAccount] = useState<string | null>(null);
+  const [copiedAccountId, setCopiedAccountId] = useState<string | null>(null);
 
   // Add account form state
   const [issuer, setIssuer] = useState('');
@@ -616,6 +617,23 @@ export function App() {
     }
   }
 
+  // Copy accountId to clipboard
+  async function handleCopyAccountId(accountId: string) {
+    try {
+      await navigator.clipboard.writeText(accountId);
+      setCopiedAccountId(accountId);
+      setTimeout(() => setCopiedAccountId(null), 1500);
+    } catch (err) {
+      console.error('Failed to copy accountId:', err);
+    }
+  }
+
+  // Format accountId for display (truncate middle)
+  function formatAccountId(id: string): string {
+    if (id.length <= 12) return id;
+    return `${id.slice(0, 6)}...${id.slice(-6)}`;
+  }
+
   // Format code with space in middle (e.g., "123 456")
   function formatCode(code: string): string {
     if (code.length === 6) {
@@ -738,6 +756,14 @@ export function App() {
                             />
                           </div>
                           <span className="timer-text">{code.remainingSeconds}s</span>
+                        </div>
+                        {/* Account ID for dApp integration */}
+                        <div
+                          className={`account-id ${copiedAccountId === account.id ? 'copied' : ''}`}
+                          onClick={() => handleCopyAccountId(account.id)}
+                          title="Click to copy Account ID (for dApp integration)"
+                        >
+                          {copiedAccountId === account.id ? 'ID Copied!' : `ID: ${formatAccountId(account.id)}`}
                         </div>
                       </>
                     ) : (

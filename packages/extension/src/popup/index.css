@@ -322,6 +322,28 @@ input:focus {
   padding: 16px;
 }
 
+/* Account ID display for dApp integration */
+.account-id {
+  font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  color: #64748b;
+  text-align: center;
+  padding: 8px;
+  margin-top: 8px;
+  border-top: 1px solid #2d2d44;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.account-id:hover {
+  color: #94a3b8;
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.account-id.copied {
+  color: #22c55e;
+}
+
 /* Pending Auth Requests */
 .pending-requests {
   background: rgba(251, 191, 36, 0.08);
