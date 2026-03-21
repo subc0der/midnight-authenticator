@@ -30,38 +30,9 @@ import {
   type PendingAuthRequest,
 } from '../shared/proof/index.js';
 
+import { fromBase32 } from '../shared/crypto/base32';
+
 const storage = getEncryptedStorage();
-
-// Base32 alphabet for secret input (user convenience)
-const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-
-/**
- * Decode base32 string to Uint8Array
- */
-function fromBase32(base32: string): Uint8Array {
-  const cleaned = base32.replace(/\s/g, '').toUpperCase().replace(/=+$/, '');
-
-  const bytes: number[] = [];
-  let buffer = 0;
-  let bitsLeft = 0;
-
-  for (const char of cleaned) {
-    const val = BASE32_ALPHABET.indexOf(char);
-    if (val === -1) {
-      throw new Error('Invalid base32 character');
-    }
-
-    buffer = (buffer << 5) | val;
-    bitsLeft += 5;
-
-    if (bitsLeft >= 8) {
-      bitsLeft -= 8;
-      bytes.push((buffer >> bitsLeft) & 0xff);
-    }
-  }
-
-  return new Uint8Array(bytes);
-}
 
 /**
  * Convert Uint8Array to hex string

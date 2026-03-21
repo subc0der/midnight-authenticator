@@ -46,6 +46,9 @@ globalThis.chrome = {
     sendMessage: vi.fn(),
     getManifest: vi.fn(() => ({ name: 'Test', version: '1.0.0' })),
     getContexts: vi.fn(async () => []),
+    ContextType: {
+      OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT',
+    },
   },
   offscreen: {
     createDocument: vi.fn(async () => {}),
