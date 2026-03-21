@@ -96,6 +96,18 @@ export function App() {
   const [providerPreference, setProviderPreference] = useState<string | null>(null);
   const [isDevMode] = useState(() => isDevelopment());
 
+  // Backup state
+  const [showBackupModal, setShowBackupModal] = useState<'export' | 'import' | null>(null);
+  const [backupPassword, setBackupPassword] = useState('');
+  const [backupConfirmPassword, setBackupConfirmPassword] = useState('');
+  const [backupFile, setBackupFile] = useState<File | null>(null);
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+  const [backupResult, setBackupResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [backupStatus, setBackupStatus] = useState<{
+    lastBackupAt: number | null;
+    needsBackup: boolean;
+  } | null>(null);
+
   useEffect(() => {
     checkVaultStatus();
   }, []);
@@ -191,6 +203,7 @@ export function App() {
           loadAccounts();
           loadProofStatus();
           loadPendingRequests();
+          loadBackupStatus();
           if (isDevMode) {
             loadProviderPreference();
           }
@@ -250,6 +263,20 @@ export function App() {
     }
   }
 
+  async function loadBackupStatus() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_BACKUP_STATUS' });
+      if (response?.success) {
+        setBackupStatus({
+          lastBackupAt: response.lastBackupAt,
+          needsBackup: response.needsBackup,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load backup status:', err);
+    }
+  }
+
   async function handleProviderChange(provider: string | null) {
     setProviderPreference(provider);
     try {
@@ -261,6 +288,131 @@ export function App() {
       loadProofStatus();
     } catch (err) {
       console.error('Failed to set provider preference:', err);
+    }
+  }
+
+  // Backup handlers
+  function resetBackupState() {
+    setShowBackupModal(null);
+    setBackupPassword('');
+    setBackupConfirmPassword('');
+    setBackupFile(null);
+    setImportMode('merge');
+    setBackupResult(null);
+  }
+
+  async function handleExportBackup() {
+    if (!backupPassword) {
+      setBackupResult({ type: 'error', message: 'Please enter a password' });
+      return;
+    }
+
+    // Use same password validation as vault (enforced by backend too)
+    const passwordError = validatePasswordStrength(backupPassword);
+    if (passwordError) {
+      setBackupResult({ type: 'error', message: passwordError });
+      return;
+    }
+
+    if (backupPassword !== backupConfirmPassword) {
+      setBackupResult({ type: 'error', message: 'Passwords do not match' });
+      return;
+    }
+
+    setIsProcessing(true);
+    setBackupResult(null);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'EXPORT_BACKUP',
+        password: backupPassword,
+      });
+
+      if (response?.success && response.backup) {
+        // Download the backup file
+        const json = JSON.stringify(response.backup, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `midnight-auth-backup-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        setBackupResult({
+          type: 'success',
+          message: `Exported ${response.backup.accountCount} accounts. Keep this file safe!`,
+        });
+        loadBackupStatus(); // Refresh backup status
+        // Auto-close modal after success
+        setTimeout(() => {
+          resetBackupState();
+        }, 1500);
+      } else {
+        setBackupResult({ type: 'error', message: response?.error || 'Export failed' });
+      }
+    } catch (err) {
+      setBackupResult({ type: 'error', message: 'Export failed' });
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleImportBackup() {
+    if (!backupFile) {
+      setBackupResult({ type: 'error', message: 'Please select a backup file' });
+      return;
+    }
+
+    if (!backupPassword) {
+      setBackupResult({ type: 'error', message: 'Please enter the backup password' });
+      return;
+    }
+
+    setIsProcessing(true);
+    setBackupResult(null);
+
+    try {
+      // Read and parse the backup file
+      const text = await backupFile.text();
+      const backup = JSON.parse(text);
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'IMPORT_BACKUP',
+        backup,
+        password: backupPassword,
+        mode: importMode,
+      });
+
+      if (response?.success) {
+        const msg = response.skipped > 0
+          ? `Imported ${response.imported} accounts (${response.skipped} duplicates skipped)`
+          : `Imported ${response.imported} accounts`;
+        setBackupResult({ type: 'success', message: msg });
+        loadAccounts(); // Refresh account list
+        loadBackupStatus(); // Refresh backup status
+        // Auto-close modal after success
+        setTimeout(() => {
+          resetBackupState();
+        }, 1500);
+      } else {
+        // Improve error messages for common cases
+        let errorMsg = response?.error || 'Import failed';
+        if (errorMsg.includes('operation-specific') || errorMsg.includes('decrypt')) {
+          errorMsg = 'Wrong password';
+        }
+        setBackupResult({ type: 'error', message: errorMsg });
+      }
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        setBackupResult({ type: 'error', message: 'Invalid backup file format' });
+      } else {
+        setBackupResult({ type: 'error', message: 'Import failed' });
+      }
+    } finally {
+      setIsProcessing(false);
     }
   }
 
@@ -395,6 +547,7 @@ export function App() {
         loadAccounts();
         loadProofStatus();
         loadPendingRequests();
+        loadBackupStatus();
         if (isDevMode) {
           loadProviderPreference();
         }
@@ -417,8 +570,8 @@ export function App() {
   async function handleAddAccount() {
     setError(null);
 
-    if (!issuer.trim() || !accountName.trim() || !secret.trim()) {
-      setError('All fields are required');
+    if (!issuer.trim() || !accountName.trim()) {
+      setError('Service name and account name are required');
       return;
     }
 
@@ -429,7 +582,8 @@ export function App() {
         type: 'ADD_ACCOUNT',
         issuer: issuer.trim(),
         name: accountName.trim(),
-        secret: secret.trim(),
+        // Only send secret if provided (dev mode), otherwise auto-generate
+        ...(secret.trim() ? { secret: secret.trim() } : {}),
       });
 
       if (response?.success) {
@@ -556,25 +710,33 @@ export function App() {
         </div>
         <input
           type="text"
-          placeholder="Issuer (e.g., GitHub)"
+          placeholder="Service (e.g., My Bank dApp)"
           value={issuer}
           onChange={(e) => setIssuer(e.target.value)}
           disabled={isProcessing}
         />
         <input
           type="text"
-          placeholder="Account name (e.g., user@example.com)"
+          placeholder="Account name (e.g., main, work)"
           value={accountName}
           onChange={(e) => setAccountName(e.target.value)}
           disabled={isProcessing}
         />
-        <input
-          type="text"
-          placeholder="Secret key (base32)"
-          value={secret}
-          onChange={(e) => setSecret(e.target.value)}
-          disabled={isProcessing}
-        />
+        {/* Secret input only shown in dev mode - production auto-generates */}
+        {isDevMode && (
+          <input
+            type="text"
+            placeholder="Secret key (optional, base32)"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            disabled={isProcessing}
+          />
+        )}
+        {!isDevMode && (
+          <p className="auto-generate-note">
+            A secure key will be generated automatically.
+          </p>
+        )}
         <button
           onClick={handleAddAccount}
           disabled={isProcessing}
@@ -640,6 +802,24 @@ export function App() {
       return `${code.slice(0, 3)} ${code.slice(3)}`;
     }
     return code;
+  }
+
+  // Format backup date for display
+  function formatBackupDate(timestamp: number): string {
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return 'Today';
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return `${diffDays} days ago`;
+    } else {
+      const date = new Date(timestamp);
+      return date.toLocaleDateString();
+    }
   }
 
   // Get the account name for a pending request
@@ -787,6 +967,46 @@ export function App() {
         )}
       </div>
       <button onClick={() => setView('add')}>Add Account</button>
+
+      {/* Backup status indicator */}
+      {backupStatus && accounts.length > 0 && (
+        <div className={`backup-status ${backupStatus.needsBackup ? 'needs-backup' : ''}`}>
+          <span className="backup-icon">{backupStatus.needsBackup ? '!' : ''}</span>
+          <span className="backup-text">
+            {backupStatus.lastBackupAt === null
+              ? 'Never backed up'
+              : `Last backup: ${formatBackupDate(backupStatus.lastBackupAt)}`}
+          </span>
+          {backupStatus.needsBackup && (
+            <button
+              className="backup-now-button"
+              onClick={() => setShowBackupModal('export')}
+            >
+              Backup Now
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Backup actions */}
+      <div className="backup-actions">
+        <button
+          className="secondary-button"
+          onClick={() => setShowBackupModal('export')}
+          disabled={accounts.length === 0}
+          title={accounts.length === 0 ? 'No accounts to export' : 'Export encrypted backup'}
+        >
+          Export Backup
+        </button>
+        <button
+          className="secondary-button"
+          onClick={() => setShowBackupModal('import')}
+          title="Import from backup file"
+        >
+          Import Backup
+        </button>
+      </div>
+
       {error && <p className="error" role="alert">{error}</p>}
 
       {/* Provider toggle - dev mode only */}
@@ -803,6 +1023,123 @@ export function App() {
             <option value="http">Docker Proof Server</option>
             <option value="mock">Mock (dev only)</option>
           </select>
+        </div>
+      )}
+
+      {/* Backup Modal */}
+      {showBackupModal && (
+        <div className="modal-overlay" onClick={() => !isProcessing && resetBackupState()}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{showBackupModal === 'export' ? 'Export Backup' : 'Import Backup'}</h2>
+
+            {showBackupModal === 'export' ? (
+              <>
+                <p className="modal-description">
+                  Create an encrypted backup of all your accounts. You'll need this password to restore the backup later.
+                </p>
+                <input
+                  type="password"
+                  placeholder="Backup password (min 8 characters)"
+                  value={backupPassword}
+                  onChange={(e) => setBackupPassword(e.target.value)}
+                  disabled={isProcessing}
+                />
+                <input
+                  type="password"
+                  placeholder="Confirm password"
+                  value={backupConfirmPassword}
+                  onChange={(e) => setBackupConfirmPassword(e.target.value)}
+                  disabled={isProcessing}
+                />
+                <div className="modal-actions">
+                  <button
+                    onClick={handleExportBackup}
+                    disabled={isProcessing}
+                    aria-busy={isProcessing}
+                  >
+                    {isProcessing ? 'Exporting...' : 'Export'}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={resetBackupState}
+                    disabled={isProcessing}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="modal-description">
+                  Select a backup file and enter the password used when the backup was created.
+                </p>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={(e) => setBackupFile(e.target.files?.[0] || null)}
+                  disabled={isProcessing}
+                />
+                <input
+                  type="password"
+                  placeholder="Backup password"
+                  value={backupPassword}
+                  onChange={(e) => setBackupPassword(e.target.value)}
+                  disabled={isProcessing}
+                />
+                <div className="import-mode">
+                  <label>
+                    <input
+                      type="radio"
+                      name="importMode"
+                      value="merge"
+                      checked={importMode === 'merge'}
+                      onChange={() => setImportMode('merge')}
+                      disabled={isProcessing}
+                    />
+                    Merge (skip duplicates)
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="importMode"
+                      value="replace"
+                      checked={importMode === 'replace'}
+                      onChange={() => setImportMode('replace')}
+                      disabled={isProcessing}
+                    />
+                    Replace all accounts
+                  </label>
+                </div>
+                {importMode === 'replace' && (
+                  <p className="destructive-warning" role="alert">
+                    This will permanently delete all {accounts.length} existing account{accounts.length !== 1 ? 's' : ''} and replace them with the backup contents. This cannot be undone.
+                  </p>
+                )}
+                <div className="modal-actions">
+                  <button
+                    onClick={handleImportBackup}
+                    disabled={isProcessing || !backupFile}
+                    aria-busy={isProcessing}
+                  >
+                    {isProcessing ? 'Importing...' : 'Import'}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={resetBackupState}
+                    disabled={isProcessing}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+
+            {backupResult && (
+              <p className={backupResult.type === 'success' ? 'success' : 'error'} role="alert">
+                {backupResult.message}
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

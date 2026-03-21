@@ -12,6 +12,13 @@ import {
   EncryptedAccount,
 } from '../shared/storage/encrypted-storage';
 
+import {
+  createBackup,
+  restoreBackup,
+  type BackupFile,
+  type BackupAccount,
+} from '../shared/storage/backup';
+
 // Import pure circuits from compiled contract
 import { pureCircuits } from '@midnight-authenticator/contracts';
 
@@ -302,7 +309,7 @@ async function handleMessage(
       return addAccount(
         message['issuer'] as string,
         message['name'] as string,
-        message['secret'] as string
+        message['secret'] as string | undefined
       );
 
     case 'DELETE_ACCOUNT':
@@ -357,6 +364,19 @@ async function handleMessage(
 
     case 'GET_PROVIDER_PREFERENCE':
       return getProviderPreference();
+
+    case 'EXPORT_BACKUP':
+      return exportBackup(message['password'] as string);
+
+    case 'IMPORT_BACKUP':
+      return importBackup(
+        message['backup'] as BackupFile,
+        message['password'] as string,
+        message['mode'] as 'merge' | 'replace'
+      );
+
+    case 'GET_BACKUP_STATUS':
+      return getBackupStatus();
 
     default:
       console.warn(`[Background] Unknown message type: ${message.type}`);
@@ -419,7 +439,7 @@ async function getAccounts(): Promise<{ success: boolean; accounts?: Account[]; 
 async function addAccount(
   issuer: string,
   name: string,
-  secretBase32: string
+  secretBase32?: string
 ): Promise<{ success: boolean; account?: Account; error?: string }> {
   if (!storage.isUnlocked()) {
     return { success: false, error: 'Vault is locked' };
@@ -428,26 +448,31 @@ async function addAccount(
   // Reset auto-lock timer on activity
   resetAutoLockTimer();
 
-  // Input validation
-  if (!issuer?.trim() || !name?.trim() || !secretBase32?.trim()) {
-    return { success: false, error: 'All fields are required' };
+  // Input validation - issuer and name required, secret is optional (auto-generated if not provided)
+  if (!issuer?.trim() || !name?.trim()) {
+    return { success: false, error: 'Service name and account name are required' };
   }
 
-  // Validate base32 format
-  const base32Regex = /^[A-Z2-7]+=*$/i;
-  const cleanedSecret = secretBase32.replace(/\s/g, '');
-  if (!base32Regex.test(cleanedSecret)) {
-    return { success: false, error: 'Invalid secret format (expected base32)' };
+  let secret: Uint8Array;
+
+  if (secretBase32?.trim()) {
+    // Manual secret provided (dev/advanced mode) - validate and use it
+    const base32Regex = /^[A-Z2-7]+=*$/i;
+    const cleanedSecret = secretBase32.replace(/\s/g, '');
+    if (!base32Regex.test(cleanedSecret)) {
+      return { success: false, error: 'Invalid secret format (expected base32)' };
+    }
+    // Decode secret from base32 and normalize to 32 bytes
+    const rawSecret = fromBase32(cleanedSecret);
+    secret = await normalizeSecretTo32Bytes(rawSecret);
+  } else {
+    // Auto-generate a secure random secret (production mode)
+    // 32 bytes of cryptographically secure random data
+    secret = crypto.getRandomValues(new Uint8Array(32));
   }
 
   try {
     const data = (await storage.load()) || { accounts: [] };
-
-    // Decode secret from base32
-    const rawSecret = fromBase32(cleanedSecret);
-
-    // Normalize to 32 bytes for contract compatibility
-    const secret = await normalizeSecretTo32Bytes(rawSecret);
 
     // Generate random blinder (32 bytes)
     const blinder = crypto.getRandomValues(new Uint8Array(32));
@@ -907,6 +932,246 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i] = parseInt(cleanHex.substr(i * 2, 2), 16);
   }
   return bytes;
+}
+
+// ─── Backup & Restore ───────────────────────────────────────────────────────
+
+/**
+ * Validate password strength (same requirements as vault password).
+ * Returns error message or null if valid.
+ */
+function validatePasswordStrength(password: string): string | null {
+  if (!password || password.length < 8) {
+    return 'Password must be at least 8 characters';
+  }
+
+  const hasLower = /[a-z]/.test(password);
+  const hasUpper = /[A-Z]/.test(password);
+  const hasDigit = /[0-9]/.test(password);
+  const hasSpecial = /[^a-zA-Z0-9]/.test(password);
+
+  const typesPresent = [hasLower, hasUpper, hasDigit, hasSpecial].filter(Boolean).length;
+
+  if (typesPresent < 2) {
+    return 'Password must include at least 2 of: lowercase, uppercase, numbers, special characters';
+  }
+
+  return null;
+}
+
+/**
+ * Export all accounts to an encrypted backup file
+ */
+async function exportBackup(
+  password: string
+): Promise<{ success: boolean; backup?: BackupFile; error?: string }> {
+  if (!storage.isUnlocked()) {
+    return { success: false, error: 'Vault is locked' };
+  }
+
+  // Enforce same password strength as vault password
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) {
+    return { success: false, error: passwordError };
+  }
+
+  resetAutoLockTimer();
+
+  try {
+    const data = await storage.load();
+    if (!data || data.accounts.length === 0) {
+      return { success: false, error: 'No accounts to export' };
+    }
+
+    // Decrypt each account's secret and blinder for backup
+    const backupAccounts: BackupAccount[] = [];
+
+    for (const ea of data.accounts) {
+      const secret = await storage.decryptField(ea.encryptedSecret);
+      const blinder = await storage.decryptField(ea.encryptedBlinder);
+
+      backupAccounts.push({
+        id: ea.account.id,
+        name: ea.account.name,
+        issuer: ea.account.issuer,
+        commitment: ea.account.commitment,
+        commitmentVersion: ea.account.commitmentVersion,
+        createdAt: ea.account.createdAt,
+        secret: Array.from(secret),
+        blinder: Array.from(blinder),
+      });
+
+      // Zero out decrypted values
+      secret.fill(0);
+      blinder.fill(0);
+    }
+
+    const backup = await createBackup(backupAccounts, password);
+
+    // Zero out backup accounts (secrets are now encrypted in backup)
+    for (const ba of backupAccounts) {
+      ba.secret.fill(0);
+      ba.blinder.fill(0);
+    }
+
+    // Save backup metadata inside encrypted vault (privacy: prevents other
+    // extensions from seeing backup activity and account count)
+    data.backupMetadata = {
+      lastBackupAt: Date.now(),
+      lastBackupAccountCount: backup.accountCount,
+    };
+    await storage.save(data);
+
+    console.log(`[Background] Created backup with ${backup.accountCount} accounts`);
+    return { success: true, backup };
+  } catch (error) {
+    console.error('[Background] Failed to create backup:', error);
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * Import accounts from an encrypted backup file
+ */
+async function importBackup(
+  backup: BackupFile,
+  password: string,
+  mode: 'merge' | 'replace'
+): Promise<{ success: boolean; imported?: number; skipped?: number; error?: string }> {
+  if (!storage.isUnlocked()) {
+    return { success: false, error: 'Vault is locked' };
+  }
+
+  resetAutoLockTimer();
+
+  try {
+    // Restore and decrypt the backup
+    const backupAccounts = await restoreBackup(backup, password);
+
+    const data = (await storage.load()) || { accounts: [] };
+    const existingIds = new Set(data.accounts.map((ea) => ea.account.id));
+
+    let imported = 0;
+    let skipped = 0;
+
+    if (mode === 'replace') {
+      // Replace all accounts
+      data.accounts = [];
+      existingIds.clear();
+    }
+
+    for (const ba of backupAccounts) {
+      // Skip duplicates in merge mode
+      if (existingIds.has(ba.id)) {
+        skipped++;
+        continue;
+      }
+
+      // Re-encrypt secret and blinder with current vault key
+      const secret = new Uint8Array(ba.secret);
+      const blinder = new Uint8Array(ba.blinder);
+
+      const encryptedSecret = await storage.encryptField(secret);
+      const encryptedBlinder = await storage.encryptField(blinder);
+
+      // Zero out plaintext
+      secret.fill(0);
+      blinder.fill(0);
+      ba.secret.fill(0);
+      ba.blinder.fill(0);
+
+      const account: Account = {
+        id: ba.id,
+        name: ba.name,
+        issuer: ba.issuer,
+        commitment: ba.commitment,
+        commitmentVersion: ba.commitmentVersion,
+        createdAt: ba.createdAt,
+      };
+
+      const encryptedAccount: EncryptedAccount = {
+        account,
+        encryptedSecret,
+        encryptedBlinder,
+      };
+
+      data.accounts.push(encryptedAccount);
+      existingIds.add(ba.id);
+      imported++;
+    }
+
+    await storage.save(data);
+
+    console.log(`[Background] Imported ${imported} accounts, skipped ${skipped} duplicates`);
+    return { success: true, imported, skipped };
+  } catch (error) {
+    console.error('[Background] Failed to import backup:', error);
+
+    // Provide user-friendly error messages
+    const err = error as Error;
+    const message = err.message || '';
+    const name = err.name || '';
+
+    // AES-GCM decryption fails with OperationError for wrong password
+    if (
+      name === 'OperationError' ||
+      message.includes('operation-specific') ||
+      message.includes('integrity check failed') ||
+      message.includes('corrupted') ||
+      message.includes('decrypt')
+    ) {
+      return { success: false, error: 'Wrong password' };
+    }
+    return { success: false, error: message || 'Import failed' };
+  }
+}
+
+/**
+ * Get backup status (last backup time, account count at backup)
+ *
+ * Note: Backup metadata is stored inside the encrypted vault for privacy.
+ * This prevents other extensions from seeing backup activity.
+ */
+async function getBackupStatus(): Promise<{
+  success: boolean;
+  lastBackupAt: number | null;
+  lastBackupAccountCount: number | null;
+  currentAccountCount: number;
+  needsBackup: boolean;
+}> {
+  // Backup metadata is now inside encrypted vault
+  let lastBackupAt: number | null = null;
+  let lastBackupAccountCount: number | null = null;
+  let currentAccountCount = 0;
+
+  if (storage.isUnlocked()) {
+    const data = await storage.load();
+    currentAccountCount = data?.accounts.length || 0;
+
+    if (data?.backupMetadata) {
+      lastBackupAt = data.backupMetadata.lastBackupAt;
+      lastBackupAccountCount = data.backupMetadata.lastBackupAccountCount;
+    }
+  }
+
+  // Determine if backup is needed:
+  // - Never backed up and has accounts
+  // - Account count changed since last backup
+  // - Last backup was more than 7 days ago
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  const needsBackup =
+    currentAccountCount > 0 &&
+    (lastBackupAt === null ||
+      lastBackupAccountCount !== currentAccountCount ||
+      Date.now() - lastBackupAt > sevenDaysMs);
+
+  return {
+    success: true,
+    lastBackupAt,
+    lastBackupAccountCount,
+    currentAccountCount,
+    needsBackup,
+  };
 }
 
 // ─── Auto-Lock Timer ────────────────────────────────────────────────────────

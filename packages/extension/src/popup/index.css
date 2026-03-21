@@ -237,6 +237,16 @@ input:focus {
   font-size: 13px;
 }
 
+.auto-generate-note {
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+  padding: 8px;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 6px;
+  border: 1px dashed rgba(99, 102, 241, 0.3);
+}
+
 .spinner {
   width: 32px;
   height: 32px;
@@ -453,4 +463,179 @@ input:focus {
 .dev-footer select:focus {
   outline: none;
   border-color: #6366f1;
+}
+
+/* Backup Actions */
+.backup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.backup-actions button {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+/* Backup Status Indicator */
+.backup-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.backup-status.needs-backup {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.backup-icon {
+  font-weight: 700;
+  font-size: 14px;
+  color: #fbbf24;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(251, 191, 36, 0.2);
+  border-radius: 50%;
+}
+
+.backup-status:not(.needs-backup) .backup-icon {
+  display: none;
+}
+
+.backup-text {
+  flex: 1;
+}
+
+.backup-status.needs-backup .backup-text {
+  color: #fbbf24;
+}
+
+.backup-now-button {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: #fbbf24;
+  color: #0f0f1a;
+  font-weight: 600;
+}
+
+.backup-now-button:hover {
+  background: #f59e0b;
+}
+
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal {
+  background: #1a1a2e;
+  border: 1px solid #2d2d44;
+  border-radius: 12px;
+  padding: 20px;
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+}
+
+.modal-description {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.modal input[type="file"] {
+  padding: 10px;
+  font-size: 12px;
+}
+
+.modal input[type="file"]::-webkit-file-upload-button {
+  background: #6366f1;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+
+.modal input[type="file"]::-webkit-file-upload-button:hover {
+  background: #818cf8;
+}
+
+.import-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.import-mode label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.import-mode input[type="radio"] {
+  width: auto;
+  accent-color: #6366f1;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.modal-actions button {
+  flex: 1;
+}
+
+.success {
+  color: #22c55e;
+  font-size: 13px;
+}
+
+/* Destructive action warning */
+.destructive-warning {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #f87171;
+  line-height: 1.4;
 }

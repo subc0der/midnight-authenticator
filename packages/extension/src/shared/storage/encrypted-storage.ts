@@ -58,6 +58,14 @@ export interface VaultData {
     autoLockMinutes: number;
     [key: string]: unknown;
   };
+  /**
+   * Backup metadata stored inside encrypted vault for privacy.
+   * This prevents other extensions from seeing backup activity.
+   */
+  backupMetadata?: {
+    lastBackupAt: number;
+    lastBackupAccountCount: number;
+  };
 }
 
 // Offscreen document management
