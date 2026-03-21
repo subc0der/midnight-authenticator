@@ -39,7 +39,7 @@ Codes displayed in this app will **NOT match** standard authenticators like Goog
 | TypeScript Bindings | ✅ Generated | Full type-safe API |
 | Chrome Extension | ✅ MVP Complete | Encrypted vault, ZK code generation |
 | Proof Provider | ✅ Architecture Ready | Lace wallet integration for mainnet |
-| Security Reviews | ✅ 8 Reviews | All issues addressed |
+| Security Reviews | ✅ 9 Reviews | All issues addressed |
 | Test Coverage | ✅ 129 Tests | Vault, backup, accounts, crypto |
 
 ### Proof Generation
@@ -285,7 +285,7 @@ Test coverage includes:
   - Monorepo setup
 
 - [x] **Phase 2: Core Circuits**
-  - `totp-verifier.compact` with 7 security reviews
+  - `totp-verifier.compact` with 9 security reviews
   - Compact CLI compilation (3 circuits)
   - TypeScript bindings generated
 
@@ -352,7 +352,7 @@ pnpm dev
 
 Contributions welcome! Please read the security notes in `.claude/context/security-learnings.md` before contributing security-sensitive code.
 
-This project has undergone 8 security-focused code reviews. Key patterns:
+This project has undergone 9 security-focused code reviews. Key patterns:
 - All auth requests require explicit user approval (no silent proof generation)
 - Secrets zeroed after use (`secret.fill(0)`)
 - Origin validation via `sender.origin`, not message payload
