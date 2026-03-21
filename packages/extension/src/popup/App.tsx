@@ -96,6 +96,9 @@ export function App() {
   const [providerPreference, setProviderPreference] = useState<string | null>(null);
   const [isDevMode] = useState(() => isDevelopment());
 
+  // Toast notifications
+  const [toast, setToast] = useState<{ type: 'error' | 'success' | 'warning'; message: string } | null>(null);
+
   // Backup state
   const [showBackupModal, setShowBackupModal] = useState<'export' | 'import' | null>(null);
   const [backupPassword, setBackupPassword] = useState('');
@@ -107,6 +110,12 @@ export function App() {
     lastBackupAt: number | null;
     needsBackup: boolean;
   } | null>(null);
+
+  // Show toast notification (auto-dismisses after 3s)
+  const showToast = useCallback((type: 'error' | 'success' | 'warning', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
 
   useEffect(() => {
     checkVaultStatus();
@@ -224,9 +233,12 @@ export function App() {
       const response = await chrome.runtime.sendMessage({ type: 'GET_ACCOUNTS' });
       if (response?.success) {
         setAccounts(response.accounts || []);
+      } else if (response?.error) {
+        showToast('error', `Failed to load accounts: ${response.error}`);
       }
     } catch (err) {
       console.error('Failed to load accounts:', err);
+      showToast('error', 'Unable to load accounts. Please try again.');
     }
   }
 
@@ -238,6 +250,7 @@ export function App() {
       }
     } catch (err) {
       console.error('Failed to load proof status:', err);
+      // Non-critical - don't show toast, just log
     }
   }
 
@@ -592,6 +605,7 @@ export function App() {
         setSecret('');
         setView('list');
         loadAccounts();
+        showToast('success', 'Account added successfully');
       } else if (response?.error === 'Vault is locked') {
         // SW lost the key - redirect to unlock
         setState('locked');
@@ -622,6 +636,7 @@ export function App() {
 
       if (response?.success) {
         loadAccounts();
+        showToast('success', 'Account deleted');
       } else if (response?.error === 'Vault is locked') {
         setState('locked');
         setError('Session expired. Please unlock again.');
@@ -629,7 +644,7 @@ export function App() {
         setError(response?.error || 'Failed to delete account');
       }
     } catch (err) {
-      setError('Failed to delete account');
+      setError('Failed to delete account. Please try again.');
     }
   }
 
@@ -776,6 +791,7 @@ export function App() {
       setTimeout(() => setCopiedAccount(null), 1500);
     } catch (err) {
       console.error('Failed to copy:', err);
+      showToast('error', 'Failed to copy code to clipboard');
     }
   }
 
@@ -787,6 +803,7 @@ export function App() {
       setTimeout(() => setCopiedAccountId(null), 1500);
     } catch (err) {
       console.error('Failed to copy accountId:', err);
+      showToast('error', 'Failed to copy Account ID to clipboard');
     }
   }
 
@@ -1139,6 +1156,15 @@ export function App() {
                 {backupResult.message}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Toast notifications */}
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`} role="alert">
+            {toast.message}
           </div>
         </div>
       )}

@@ -39,7 +39,8 @@ Codes displayed in this app will **NOT match** standard authenticators like Goog
 | TypeScript Bindings | ✅ Generated | Full type-safe API |
 | Chrome Extension | ✅ MVP Complete | Encrypted vault, ZK code generation |
 | Proof Provider | ✅ Architecture Ready | Lace wallet integration for mainnet |
-| Security Reviews | ✅ 7 Reviews | All issues addressed |
+| Security Reviews | ✅ 8 Reviews | All issues addressed |
+| Test Coverage | ✅ 129 Tests | Vault, backup, accounts, crypto |
 
 ### Proof Generation
 
@@ -58,6 +59,7 @@ At mainnet, users with Lace wallet will automatically use Midnight's hosted proo
 - Zero-knowledge authentication using Midnight's ZK proof system
 - ZK-native code generation (`persistentHash`)
 - Encrypted local vault (Argon2id + AES-256-GCM)
+- Encrypted backup/restore with password protection
 - Chrome extension (Manifest V3)
 - Real-time countdown timer (30-second windows)
 - Click-to-copy codes
@@ -154,6 +156,26 @@ After loading the extension:
 
 **Note**: These codes are ZK-native and will NOT match Google Authenticator.
 
+## Backup & Restore
+
+Your accounts are stored in an encrypted vault. To prevent data loss:
+
+1. Click the **Export Backup** button
+2. Enter a strong password (8+ characters, 2+ character types)
+3. Save the encrypted `.json` file securely
+
+To restore from backup:
+
+1. Click **Import Backup**
+2. Select your backup file
+3. Enter the backup password
+4. Choose **Merge** (add to existing) or **Replace** (overwrite all)
+
+**Security notes:**
+- Backup files are encrypted with PBKDF2 (600k iterations) + AES-256-GCM
+- The extension shows a warning if you haven't backed up recently
+- Backups contain secrets—store them securely (password manager, encrypted drive)
+
 ## Contract Architecture
 
 The `totp-verifier.compact` contract provides:
@@ -242,8 +264,16 @@ pnpm dev
 ### Run Tests
 
 ```bash
-pnpm test
+pnpm test              # Run all tests
+pnpm test --coverage   # With coverage report
 ```
+
+Test coverage includes:
+- Vault encryption/decryption (22 tests)
+- Base32 encoding (24 tests)
+- Password validation (15 tests)
+- Backup/restore (14 tests)
+- Account CRUD (54 tests)
 
 ## Roadmap
 
@@ -273,9 +303,9 @@ pnpm test
 ### In Progress
 
 - [ ] **Phase 5: Production**
-  - QR code scanning for secret import
   - Mainnet deployment (pending mainnet launch)
   - Chrome Web Store submission
+  - End-to-end testing with real ZK proofs
 
 ## Demo dApp
 
@@ -322,7 +352,7 @@ pnpm dev
 
 Contributions welcome! Please read the security notes in `.claude/context/security-learnings.md` before contributing security-sensitive code.
 
-This project has undergone 7 security-focused code reviews. Key patterns:
+This project has undergone 8 security-focused code reviews. Key patterns:
 - All auth requests require explicit user approval (no silent proof generation)
 - Secrets zeroed after use (`secret.fill(0)`)
 - Origin validation via `sender.origin`, not message payload
