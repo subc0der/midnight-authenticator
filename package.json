@@ -12,6 +12,7 @@
     "deploy": "pnpm --filter @midnight-authenticator/deploy-cli deploy",
     "dev": "pnpm -r --parallel dev",
     "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck"

@@ -16,7 +16,8 @@
     "dev": "tsc --watch",
     "clean": "rimraf dist",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@midnight-authenticator/contracts": "workspace:*",
