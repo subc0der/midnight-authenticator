@@ -6,7 +6,7 @@
 
 *Prove you have the right code without showing it.*
 
-Midnight Authenticator enables users to prove they possess a valid authentication code without revealing the underlying secret or the code itself. Unlike traditional 2FA where codes are transmitted in plaintext, this authenticator replaces codes with zero-knowledge proofs—privacy-preserving 2FA that doesn't leak secrets to verifiers.
+Midnight Authenticator enables users to prove they possess a valid authentication code without revealing the underlying secret or the code itself. Unlike traditional 2FA where codes are transmitted in plaintext, this authenticator replaces codes with zero-knowledge proofs - privacy-preserving 2FA that doesn't leak secrets to verifiers.
 
 **Contract deployed on Preprod:** [`02b325...1d66`](https://preprod.midnightexplorer.io/contract/02b3255950655d5c3f2695692e8135c1c4119240c64a6abfe92bdafbc1751d66)
 
@@ -52,7 +52,7 @@ The extension supports multiple proof providers with automatic fallback:
 | Docker Proof Server | Development | Available locally |
 | Mock Proofs | Development | For testing only |
 
-At mainnet, users with Lace wallet will automatically use Midnight's hosted proof servers—no Docker required.
+At mainnet, users with Lace wallet will automatically use Midnight's hosted proof servers - no Docker required.
 
 ## Features
 
@@ -174,7 +174,7 @@ To restore from backup:
 **Security notes:**
 - Backup files are encrypted with PBKDF2 (600k iterations) + AES-256-GCM
 - The extension shows a warning if you haven't backed up recently
-- Backups contain secrets—store them securely (password manager, encrypted drive)
+- Backups contain secrets - store them securely (password manager, encrypted drive)
 
 ## Contract Architecture
 
