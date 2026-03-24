@@ -44,15 +44,25 @@ Codes displayed in this app will **NOT match** standard authenticators like Goog
 
 ### Proof Generation
 
-The extension supports multiple proof providers with automatic fallback:
+| Component | Proof Type | Notes |
+|-----------|------------|-------|
+| **Deploy CLI** (Node.js) | Real ZK proofs | Uses Docker proof server |
+| **Browser Extension** | Mock proofs | SDK browser limitation (same as all Midnight extensions) |
+| **Mainnet** | Real ZK proofs | Via Lace wallet integration |
 
-| Provider | Environment | Status |
-|----------|-------------|--------|
-| **Lace Wallet** | Mainnet | Ready (activates at mainnet) |
-| Docker Proof Server | Development | Available locally |
-| Mock Proofs | Development | For testing only |
+**For developers testing real ZK proofs:**
 
-At mainnet, users with Lace wallet will automatically use Midnight's hosted proof servers - no Docker required.
+```bash
+# Start proof server
+docker run -d --name proof-server -p 6300:6300 \
+  midnightntwrk/proof-server:7.0.0 midnight-proof-server -v
+
+# Deploy contract with real ZK proofs
+cd packages/deploy-cli
+MIDNIGHT_SEED="your64hexseed" pnpm deploy
+```
+
+The browser extension uses mock proofs during development because the Midnight SDK doesn't yet support browser-based proof generation. This is a known limitation shared by all Midnight browser extensions. At mainnet, users with Lace wallet will automatically use real proofs via Midnight's hosted infrastructure.
 
 ## Features
 
