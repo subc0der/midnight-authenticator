@@ -37,7 +37,7 @@ Codes displayed in this app will **NOT match** standard authenticators like Goog
 |-----------|--------|-------|
 | Compact Contract | ✅ Deployed | `totp-verifier.compact` on preprod |
 | TypeScript Bindings | ✅ Generated | Full type-safe API |
-| Chrome Extension | ✅ MVP Complete | Encrypted vault, ZK code generation |
+| Chrome Extension | ✅ MVP Complete | Encrypted vault, ZK code generation (mock proofs in dev, see below) |
 | Proof Provider | ✅ Architecture Ready | Lace wallet integration for mainnet |
 | Security Reviews | ✅ 9 Reviews | All issues addressed |
 | Test Coverage | ✅ 129 Tests | Vault, backup, accounts, crypto |
@@ -63,6 +63,8 @@ MIDNIGHT_SEED="your64hexseed" pnpm deploy
 ```
 
 The browser extension uses mock proofs during development because the Midnight SDK doesn't yet support browser-based proof generation. This is a known limitation shared by all Midnight browser extensions. At mainnet, users with Lace wallet will automatically use real proofs via Midnight's hosted infrastructure.
+
+**Security note:** Mock proofs are for development/testing only. They do NOT provide ZK privacy or cryptographic integrity guarantees. Never use mock proofs with real credentials or in production scenarios.
 
 ## Features
 
