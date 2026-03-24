@@ -227,13 +227,7 @@ async function openPopup(): Promise<void> {
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Ignore messages meant for offscreen document
-  // These pass through to the offscreen document's message listener
-  const offscreenMessages = [
-    'DERIVE_KEY',
-    'GENERATE_AUTH_PROOF',
-    'CHECK_PROOF_AVAILABILITY',
-  ];
-  if (offscreenMessages.includes(message.type)) {
+  if (message.type === 'DERIVE_KEY') {
     return false;
   }
 
