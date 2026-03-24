@@ -168,20 +168,21 @@ export class ProofService {
     const laceDetected = await laceProvider?.isDetected?.() ?? false;
 
     // Check which providers are available for actual use
-    const [laceUsable, mockAvailable] = await Promise.all([
+    const httpProvider = this.providers[1] as HttpProofProvider;
+    const [laceUsable, httpAvailable, mockAvailable] = await Promise.all([
       this.providers[0]?.isAvailable() ?? false,
+      this.providers[1]?.isAvailable() ?? false,
       this.providers[2]?.isAvailable() ?? false,
     ]);
 
     // Check proof server connectivity separately (for status display)
-    const httpProvider = this.providers[1] as HttpProofProvider;
     const proofServerAvailable = await httpProvider?.canConnectToServer() ?? false;
 
     // Determine active provider (what would actually be used for proofs)
     let activeProvider: string | null = null;
     if (laceUsable) activeProvider = 'lace';
+    else if (httpAvailable) activeProvider = 'http';
     else if (mockAvailable) activeProvider = 'mock';
-    // Note: HTTP not included until SDK integration is complete
 
     return {
       activeProvider,

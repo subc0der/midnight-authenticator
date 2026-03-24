@@ -145,3 +145,68 @@ export interface AuthResponse {
   /** Whether this was a mock proof */
   isMock?: boolean;
 }
+
+// =============================================================================
+// Offscreen Document Message Types
+// =============================================================================
+
+/**
+ * Service URIs for connecting to Midnight infrastructure.
+ */
+export interface ServiceUris {
+  /** Proof server URL (e.g., http://localhost:6300) */
+  proverServerUri: string;
+  /** Circuit assets URL (e.g., http://localhost:3000/circuits/totp-verifier/) */
+  circuitAssetsUrl: string;
+}
+
+/**
+ * Message sent to offscreen document to generate an auth proof.
+ */
+export interface GenerateAuthProofMessage {
+  type: 'GENERATE_AUTH_PROOF';
+  serviceUris: ServiceUris;
+  /** 32-byte account ID as number array */
+  accountId: number[];
+  /** Nonce for replay protection (as string for BigInt serialization) */
+  nonce: string;
+  /** Time window (as string for BigInt serialization) */
+  expectedTimeWindow: string;
+  /** 32-byte secret as number array */
+  secret: number[];
+  /** 32-byte blinder as number array */
+  blinder: number[];
+}
+
+/**
+ * Response from offscreen document after proof generation.
+ */
+export interface GenerateAuthProofResponse {
+  type: 'GENERATE_AUTH_PROOF_RESULT';
+  success: boolean;
+  /** Proof bytes as number array */
+  proof?: number[];
+  /** Whether authentication succeeded */
+  isVerified?: boolean;
+  /** Whether this is a mock proof */
+  isMock: boolean;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Message to check if proof provider is available.
+ */
+export interface CheckProofAvailabilityMessage {
+  type: 'CHECK_PROOF_AVAILABILITY';
+  serviceUris: ServiceUris;
+}
+
+/**
+ * Response for proof availability check.
+ */
+export interface CheckProofAvailabilityResponse {
+  type: 'CHECK_PROOF_AVAILABILITY_RESULT';
+  available: boolean;
+  error?: string;
+}
