@@ -379,7 +379,7 @@ export const configureTotpVerifierProviders = async (ctx: WalletContext, config:
     privateStateProvider: levelPrivateStateProvider<any>({
       privateStateStoreName: `${contractConfig.privateStateStoreName}-totp-verifier`,
       // New required fields for v8 API
-      privateStoragePasswordProvider: async () => 'deploy-cli-temp-password-12345678',
+      privateStoragePasswordProvider: async () => 'dpl0y-cl1-t3mp-p@ssw0rd-Xk9mN2qR',
       accountId: 'deploy-cli-account',
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),

@@ -20,7 +20,7 @@ export * from './totp-verifier-witnesses.js';
 // Contract addresses (populated after deployment)
 export const CONTRACT_ADDRESSES = {
   preprod: {
-    totpVerifier: '02b3255950655d5c3f2695692e8135c1c4119240c64a6abfe92bdafbc1751d66',
+    totpVerifier: '489d3daa91cd8929120ea72e62bb8fd4a98478ec58ba56c5054da3590ec9ca71',
   },
   mainnet: {
     totpVerifier: '',
