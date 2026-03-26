@@ -11,7 +11,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/shared/storage/**/*.ts', 'src/shared/crypto/**/*.ts'],
+      include: ['src/shared/storage/**/*.ts', 'src/shared/crypto/**/*.ts', 'src/shared/proof/**/*.ts'],
       exclude: [
         'node_modules/',
         'dist/',
