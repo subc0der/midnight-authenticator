@@ -206,7 +206,7 @@ export class ProofService {
     return (
       'No proof provider available. Please either:\n' +
       '1. Install and configure Lace wallet for Midnight\n' +
-      '2. Run proof server: docker run -d --name proof-server -p 6300:6300 midnightntwrk/proof-server:7.0.0 midnight-proof-server -v'
+      '2. Run proof server: docker run -d --name proof-server -p 6300:6300 midnightntwrk/proof-server:8.0.3 midnight-proof-server -v'
     );
   }
 

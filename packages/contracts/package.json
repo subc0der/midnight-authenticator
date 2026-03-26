@@ -12,14 +12,14 @@
     }
   },
   "scripts": {
-    "compile": "wsl -e bash -c \"source ~/.local/bin/env && cd /mnt/c/Users/mkhal/dev/midnight-authenticator/packages/contracts && compact compile src/totp-verifier.compact src/managed/totp-verifier\"",
+    "compile": "wsl -e bash -c \"cd /mnt/c/Users/mkhal/dev/midnight-authenticator/packages/contracts && PATH=~/.compact/versions/0.30.0/x86_64-unknown-linux-musl:$PATH compactc.bin src/totp-verifier.compact src/managed/totp-verifier\"",
     "build": "tsc",
     "clean": "rimraf dist src/managed",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-runtime": "0.14.0",
-    "@midnight-ntwrk/midnight-js-types": "3.1.0"
+    "@midnight-ntwrk/compact-runtime": "0.15.0",
+    "@midnight-ntwrk/midnight-js-types": "4.0.2"
   },
   "devDependencies": {
     "rimraf": "^5.0.0",

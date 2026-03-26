@@ -5,7 +5,7 @@
  * Deploys the Midnight Authenticator contract to Preprod.
  *
  * Prerequisites:
- * 1. Proof server running: docker run -d -p 6300:6300 midnightntwrk/proof-server:7.0.0 midnight-proof-server -v
+ * 1. Proof server running: docker run -d -p 6300:6300 midnightntwrk/proof-server:8.0.3 midnight-proof-server -v
  * 2. Wallet seed in MIDNIGHT_SEED environment variable (64 hex chars)
  * 3. tDUST in wallet (from https://faucet.preprod.midnight.network)
  *
@@ -128,7 +128,7 @@ async function main() {
   const proofServerOk = await checkProofServer(config.proofServer);
   if (!proofServerOk) {
     error('Proof server not running');
-    info('Start with: docker run -d -p 6300:6300 midnightntwrk/proof-server:7.0.0 midnight-proof-server -v');
+    info('Start with: docker run -d -p 6300:6300 midnightntwrk/proof-server:8.0.3 midnight-proof-server -v');
     process.exit(1);
   }
 

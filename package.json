@@ -23,8 +23,8 @@
   "pnpm": {
     "overrides": {
       "smoldot": "npm:empty-npm-package@1.0.0",
-      "@midnight-ntwrk/ledger-v7": "7.0.2",
-      "@midnight-ntwrk/compact-js": "2.4.3"
+      "@midnight-ntwrk/ledger-v8": "8.0.3",
+      "@midnight-ntwrk/compact-js": "2.5.0"
     }
   },
   "engines": {

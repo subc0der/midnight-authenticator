@@ -6,7 +6,7 @@
  *
  * Start the proof server with:
  *   docker run -d --name proof-server -p 6300:6300 \
- *     midnightntwrk/proof-server:7.0.0 midnight-proof-server -v
+ *     midnightntwrk/proof-server:8.0.3 midnight-proof-server -v
  */
 
 import type { ProofProvider, ProofRequest, ProofResult } from './types.js';

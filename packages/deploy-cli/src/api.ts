@@ -3,8 +3,8 @@
  * Adapted from Midnight Cloak patterns
  */
 
-import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { unshieldedToken } from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
@@ -260,7 +260,7 @@ const registerForDustGeneration = async (
   const state = await Rx.firstValueFrom(wallet.state().pipe(Rx.filter((s) => s.isSynced)));
 
   if (state.dust.availableCoins.length > 0) {
-    const dustBal = state.dust.walletBalance(new Date());
+    const dustBal = state.dust.balance(new Date());
     console.log(`  ✓ Dust tokens already available (${formatBalance(dustBal)} DUST)`);
     return;
   }
@@ -275,7 +275,7 @@ const registerForDustGeneration = async (
         wallet.state().pipe(
           Rx.throttleTime(5_000),
           Rx.filter((s) => s.isSynced),
-          Rx.filter((s) => s.dust.walletBalance(new Date()) > 0n),
+          Rx.filter((s) => s.dust.balance(new Date()) > 0n),
         ),
       ),
     );
@@ -297,7 +297,7 @@ const registerForDustGeneration = async (
       wallet.state().pipe(
         Rx.throttleTime(5_000),
         Rx.filter((s) => s.isSynced),
-        Rx.filter((s) => s.dust.walletBalance(new Date()) > 0n),
+        Rx.filter((s) => s.dust.balance(new Date()) > 0n),
       ),
     ),
   );
@@ -316,16 +316,26 @@ export const buildWalletAndWaitForFunds = async (config: Config, seed: string): 
       const dustSecretKey = ledger.DustSecretKey.fromSeed(keys[Roles.Dust]);
       const unshieldedKeystore = createKeystore(keys[Roles.NightExternal], getNetworkId());
 
-      const shieldedWallet = ShieldedWallet(buildShieldedConfig(config)).startWithSecretKeys(shieldedSecretKeys);
-      const unshieldedWallet = UnshieldedWallet(buildUnshieldedConfig(config)).startWithPublicKey(
-        PublicKey.fromKeyStore(unshieldedKeystore),
-      );
-      const dustWallet = DustWallet(buildDustConfig(config)).startWithSecretKey(
-        dustSecretKey,
-        ledger.LedgerParameters.initialParameters().dust,
-      );
+      // Build unified configuration for WalletFacade.init
+      const walletConfig = {
+        ...buildShieldedConfig(config),
+        ...buildUnshieldedConfig(config),
+        ...buildDustConfig(config),
+      };
 
-      const wallet = new WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
+      // Initialize wallet using new factory pattern
+      const wallet = await WalletFacade.init({
+        configuration: walletConfig as any,
+        shielded: () => ShieldedWallet(buildShieldedConfig(config)).startWithSecretKeys(shieldedSecretKeys),
+        unshielded: () => UnshieldedWallet(buildUnshieldedConfig(config)).startWithPublicKey(
+          PublicKey.fromKeyStore(unshieldedKeystore),
+        ),
+        dust: () => DustWallet(buildDustConfig(config)).startWithSecretKey(
+          dustSecretKey,
+          ledger.LedgerParameters.initialParameters().dust,
+        ),
+      });
+
       await wallet.start(shieldedSecretKeys, dustSecretKey);
 
       return { wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
@@ -368,7 +378,9 @@ export const configureTotpVerifierProviders = async (ctx: WalletContext, config:
   return {
     privateStateProvider: levelPrivateStateProvider<any>({
       privateStateStoreName: `${contractConfig.privateStateStoreName}-totp-verifier`,
-      walletProvider: walletAndMidnightProvider,
+      // New required fields for v8 API
+      privateStoragePasswordProvider: async () => 'deploy-cli-temp-password-12345678',
+      accountId: 'deploy-cli-account',
     }),
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
     zkConfigProvider,

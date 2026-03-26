@@ -1,5 +1,5 @@
 import * as __compactRuntime from '@midnight-ntwrk/compact-runtime';
-__compactRuntime.checkRuntimeVersion('0.14.0');
+__compactRuntime.checkRuntimeVersion('0.15.0');
 
 const _descriptor_0 = new __compactRuntime.CompactTypeBytes(32);
 
@@ -240,6 +240,11 @@ export class Contract {
       }
     };
     this.impureCircuits = {
+      registerAccount: this.circuits.registerAccount,
+      authenticate: this.circuits.authenticate,
+      isRegistered: this.circuits.isRegistered
+    };
+    this.provableCircuits = {
       registerAccount: this.circuits.registerAccount,
       authenticate: this.circuits.authenticate,
       isRegistered: this.circuits.isRegistered
@@ -525,7 +530,9 @@ export class Contract {
                                                                                               result: undefined } }]).value)
                         :
                         0n;
-    __compactRuntime.assert(nonce_0 > lastNonce_0, 'Nonce already used');
+    let t_0;
+    __compactRuntime.assert((t_0 = nonce_0, t_0 > lastNonce_0),
+                            'Nonce already used');
     __compactRuntime.queryLedgerState(context,
                                       partialProofData,
                                       [

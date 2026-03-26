@@ -55,7 +55,7 @@ Codes displayed in this app will **NOT match** standard authenticators like Goog
 ```bash
 # Start proof server
 docker run -d --name proof-server -p 6300:6300 \
-  midnightntwrk/proof-server:7.0.0 midnight-proof-server -v
+  midnightntwrk/proof-server:8.0.3 midnight-proof-server -v
 
 # Deploy contract with real ZK proofs
 cd packages/deploy-cli
@@ -127,7 +127,7 @@ pnpm install
 
 ```bash
 docker run -d --name proof-server -p 6300:6300 \
-  midnightntwrk/proof-server:7.0.0 midnight-proof-server -v
+  midnightntwrk/proof-server:8.0.3 midnight-proof-server -v
 
 # Verify it's running
 curl http://localhost:6300/version
@@ -228,15 +228,15 @@ The `totp-verifier.compact` contract provides:
 | Code Generation | `persistentHash` (ZK-friendly) |
 | Network | Midnight Preprod → Mainnet |
 
-### SDK Versions
+### SDK Versions (Ledger v8)
 
 | Package | Version |
 |---------|---------|
-| `@midnight-ntwrk/compact-runtime` | 0.14.0 |
-| `@midnight-ntwrk/midnight-js-contracts` | 3.1.0 |
-| `@midnight-ntwrk/ledger-v7` | 7.0.2 |
-| Proof Server | 7.0.0 |
-| Compact CLI | 0.4.0+ |
+| `@midnight-ntwrk/compact-runtime` | 0.15.0 |
+| `@midnight-ntwrk/midnight-js-contracts` | 4.0.2 |
+| `@midnight-ntwrk/ledger` | 4.0.0 |
+| Proof Server | 8.0.3 |
+| Compact CLI | 0.5.0 |
 
 ## Project Structure
 

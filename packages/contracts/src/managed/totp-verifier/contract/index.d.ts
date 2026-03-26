@@ -17,6 +17,18 @@ export type ImpureCircuits<PS> = {
                accountId_0: Uint8Array): __compactRuntime.CircuitResults<PS, boolean>;
 }
 
+export type ProvableCircuits<PS> = {
+  registerAccount(context: __compactRuntime.CircuitContext<PS>,
+                  accountId_0: Uint8Array,
+                  commitment_0: Uint8Array): __compactRuntime.CircuitResults<PS, []>;
+  authenticate(context: __compactRuntime.CircuitContext<PS>,
+               accountId_0: Uint8Array,
+               nonce_0: bigint,
+               expectedTimeWindow_0: bigint): __compactRuntime.CircuitResults<PS, boolean>;
+  isRegistered(context: __compactRuntime.CircuitContext<PS>,
+               accountId_0: Uint8Array): __compactRuntime.CircuitResults<PS, boolean>;
+}
+
 export type PureCircuits = {
   computeAuthCode(secret_0: Uint8Array, timeWindow_0: bigint): Uint8Array;
 }
@@ -70,6 +82,7 @@ export declare class Contract<PS = any, W extends Witnesses<PS> = Witnesses<PS>>
   witnesses: W;
   circuits: Circuits<PS>;
   impureCircuits: ImpureCircuits<PS>;
+  provableCircuits: ProvableCircuits<PS>;
   constructor(witnesses: W);
   initialState(context: __compactRuntime.ConstructorContext<PS>): __compactRuntime.ConstructorResult<PS>;
 }
