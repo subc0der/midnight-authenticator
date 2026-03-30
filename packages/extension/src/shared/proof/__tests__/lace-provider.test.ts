@@ -2,15 +2,28 @@
  * Tests for LaceProofProvider
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import type { ProofRequest } from '../types';
+
+// Mock lace-wallet-bridge module BEFORE importing lace-provider
+const mockIsLaceDetected = vi.fn();
+const mockGetLaceServiceConfig = vi.fn();
+const mockCallLaceMethod = vi.fn();
+
+vi.mock('../lace-wallet-bridge.js', () => ({
+  isLaceDetected: () => mockIsLaceDetected(),
+  getLaceServiceConfig: () => mockGetLaceServiceConfig(),
+  callLaceMethod: (...args: unknown[]) => mockCallLaceMethod(...args),
+}));
+
+// Now import lace-provider after mocking
 import {
   LaceProofProvider,
   createLaceProofProvider,
   isLaceAvailable,
   invalidateLaceCache,
 } from '../lace-provider';
-import type { ProofRequest } from '../types';
 
-// Mock chrome.tabs
+// Mock chrome.tabs for backward compatibility tests
 const mockTabsQuery = vi.fn();
 const mockTabsSendMessage = vi.fn();
 
@@ -47,6 +60,10 @@ describe('LaceProofProvider', () => {
     invalidateLaceCache();
     vi.clearAllMocks();
     mockFetch.mockRejectedValue(new Error('Connection refused'));
+    // Default mock behavior
+    mockIsLaceDetected.mockResolvedValue(false);
+    mockGetLaceServiceConfig.mockResolvedValue(null);
+    mockCallLaceMethod.mockRejectedValue(new Error('Not mocked'));
   });
 
   afterEach(() => {
@@ -60,42 +77,8 @@ describe('LaceProofProvider', () => {
   });
 
   describe('isAvailable', () => {
-    it('should return false when no active tab', async () => {
-      mockTabsQuery.mockResolvedValue([]);
-
-      const available = await provider.isAvailable();
-
-      expect(available).toBe(false);
-    });
-
-    it('should return false when tab has no id', async () => {
-      mockTabsQuery.mockResolvedValue([{ url: 'https://example.com' }]);
-
-      const available = await provider.isAvailable();
-
-      expect(available).toBe(false);
-    });
-
-    it('should return false when tab is chrome:// page', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'chrome://settings' }]);
-
-      const available = await provider.isAvailable();
-
-      expect(available).toBe(false);
-      expect(mockTabsSendMessage).not.toHaveBeenCalled();
-    });
-
-    it('should return false when tab is extension page', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'chrome-extension://abc123' }]);
-
-      const available = await provider.isAvailable();
-
-      expect(available).toBe(false);
-    });
-
     it('should return false when Lace is not detected', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: false });
+      mockIsLaceDetected.mockResolvedValue(false);
 
       const available = await provider.isAvailable();
 
@@ -103,46 +86,47 @@ describe('LaceProofProvider', () => {
     });
 
     it('should return false when Lace has no prover URI', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: true, proverUri: null });
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue(null);
 
       const available = await provider.isAvailable();
 
       expect(available).toBe(false);
     });
 
-    it('should return false when content script throws', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockRejectedValue(new Error('No content script'));
+    it('should return false when Lace config has empty prover URI', async () => {
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue({ proverServerUri: '' });
 
       const available = await provider.isAvailable();
 
       expect(available).toBe(false);
     });
 
-    it('should query active tab with correct parameters', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: false });
+    it('should return true when Lace is detected with prover URI', async () => {
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue({
+        proverServerUri: 'http://localhost:6300',
+      });
 
-      await provider.isAvailable();
+      const available = await provider.isAvailable();
 
-      expect(mockTabsQuery).toHaveBeenCalledWith({ active: true, currentWindow: true });
+      expect(available).toBe(true);
     });
 
-    it('should send CHECK_LACE_AVAILABLE message to content script', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 42, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: false });
+    it('should call isLaceDetected from wallet bridge', async () => {
+      mockIsLaceDetected.mockResolvedValue(false);
 
       await provider.isAvailable();
 
-      expect(mockTabsSendMessage).toHaveBeenCalledWith(42, { type: 'CHECK_LACE_AVAILABLE' });
+      expect(mockIsLaceDetected).toHaveBeenCalled();
     });
   });
 
   describe('isDetected', () => {
     it('should return true when Lace is detected (even without prover)', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: true });
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue(null);
 
       const detected = await provider.isDetected();
 
@@ -150,8 +134,7 @@ describe('LaceProofProvider', () => {
     });
 
     it('should return false when Lace is not detected', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: false });
+      mockIsLaceDetected.mockResolvedValue(false);
 
       const detected = await provider.isDetected();
 
@@ -161,10 +144,9 @@ describe('LaceProofProvider', () => {
 
   describe('getLaceInfo', () => {
     it('should return availability and prover URI', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({
-        laceAvailable: true,
-        proverUri: 'http://lace-prover:6300',
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue({
+        proverServerUri: 'http://lace-prover:6300',
       });
 
       const info = await provider.getLaceInfo();
@@ -174,7 +156,7 @@ describe('LaceProofProvider', () => {
     });
 
     it('should return unavailable when no Lace', async () => {
-      mockTabsQuery.mockResolvedValue([]);
+      mockIsLaceDetected.mockResolvedValue(false);
 
       const info = await provider.getLaceInfo();
 
@@ -185,8 +167,7 @@ describe('LaceProofProvider', () => {
 
   describe('generateAuthProof', () => {
     it('should return error when Lace not available', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: false });
+      mockIsLaceDetected.mockResolvedValue(false);
 
       const request = createValidRequest();
       const result = await provider.generateAuthProof(request);
@@ -197,8 +178,8 @@ describe('LaceProofProvider', () => {
     });
 
     it('should return error when no prover URI configured', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: true, proverUri: null });
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue(null);
 
       const request = createValidRequest();
       const result = await provider.generateAuthProof(request);
@@ -208,19 +189,40 @@ describe('LaceProofProvider', () => {
       expect(result.providerName).toBe('lace');
     });
 
-    it('should delegate to HTTP provider when Lace is configured', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({
-        laceAvailable: true,
-        proverUri: 'http://lace-prover:6300',
+    it('should return not implemented error when Lace is configured', async () => {
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue({
+        proverServerUri: 'http://lace-prover:6300',
+      });
+      // Mock getUnshieldedAddress succeeding
+      mockCallLaceMethod.mockImplementation((method: string) => {
+        if (method === 'getUnshieldedAddress') return Promise.resolve('test-address-12345');
+        return Promise.reject(new Error('Not mocked'));
       });
 
       const request = createValidRequest();
       const result = await provider.generateAuthProof(request);
 
-      // HTTP provider returns error because isAvailable returns false (SDK pending)
+      // Should return "not implemented" since Lace v4.0.1 doesn't expose direct proof gen
       expect(result.success).toBe(false);
-      expect(result.providerName).toBe('lace'); // Still marked as lace
+      expect(result.error).toContain('not yet implemented');
+      expect(result.providerName).toBe('lace');
+    });
+
+    it('should return connection error when Lace call fails', async () => {
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue({
+        proverServerUri: 'http://lace-prover:6300',
+      });
+      // Mock getUnshieldedAddress failing
+      mockCallLaceMethod.mockRejectedValue(new Error('Wallet disconnected'));
+
+      const request = createValidRequest();
+      const result = await provider.generateAuthProof(request);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Lace connection failed');
+      expect(result.providerName).toBe('lace');
     });
   });
 
@@ -234,19 +236,19 @@ describe('LaceProofProvider', () => {
     });
 
     it('should cache Lace status', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: true });
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue(null);
 
       await provider.isDetected();
       await provider.isDetected();
 
-      // Should only query once (cached)
-      expect(mockTabsSendMessage).toHaveBeenCalledTimes(1);
+      // Should only query once (cached) - isLaceDetected is called once
+      expect(mockIsLaceDetected).toHaveBeenCalledTimes(1);
     });
 
     it('should refresh cache after TTL', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: true });
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue(null);
 
       await provider.isDetected();
 
@@ -256,12 +258,12 @@ describe('LaceProofProvider', () => {
       await provider.isDetected();
 
       // Should query twice (cache expired)
-      expect(mockTabsSendMessage).toHaveBeenCalledTimes(2);
+      expect(mockIsLaceDetected).toHaveBeenCalledTimes(2);
     });
 
     it('should use cached value within TTL', async () => {
-      mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-      mockTabsSendMessage.mockResolvedValue({ laceAvailable: true });
+      mockIsLaceDetected.mockResolvedValue(true);
+      mockGetLaceServiceConfig.mockResolvedValue(null);
 
       await provider.isDetected();
 
@@ -271,7 +273,7 @@ describe('LaceProofProvider', () => {
       await provider.isDetected();
 
       // Should only query once (still cached)
-      expect(mockTabsSendMessage).toHaveBeenCalledTimes(1);
+      expect(mockIsLaceDetected).toHaveBeenCalledTimes(1);
     });
   });
 });
@@ -280,27 +282,27 @@ describe('invalidateLaceCache', () => {
   beforeEach(() => {
     invalidateLaceCache(); // Clear cache before test
     vi.clearAllMocks();
-    mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-    mockTabsSendMessage.mockResolvedValue({ laceAvailable: true });
+    mockIsLaceDetected.mockResolvedValue(true);
+    mockGetLaceServiceConfig.mockResolvedValue(null);
   });
 
   it('should clear cached status', async () => {
     const provider = new LaceProofProvider();
 
-    // First call - should query content script
+    // First call - should query
     await provider.isDetected();
-    expect(mockTabsSendMessage).toHaveBeenCalledTimes(1);
+    expect(mockIsLaceDetected).toHaveBeenCalledTimes(1);
 
     // Second call - should use cache (same call count)
     await provider.isDetected();
-    expect(mockTabsSendMessage).toHaveBeenCalledTimes(1);
+    expect(mockIsLaceDetected).toHaveBeenCalledTimes(1);
 
     // Invalidate cache
     invalidateLaceCache();
 
     // Third call - should query again since cache was cleared
     await provider.isDetected();
-    expect(mockTabsSendMessage).toHaveBeenCalledTimes(2);
+    expect(mockIsLaceDetected).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -311,8 +313,7 @@ describe('isLaceAvailable', () => {
   });
 
   it('should return true when Lace is available', async () => {
-    mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-    mockTabsSendMessage.mockResolvedValue({ laceAvailable: true });
+    mockIsLaceDetected.mockResolvedValue(true);
 
     const available = await isLaceAvailable();
 
@@ -320,8 +321,7 @@ describe('isLaceAvailable', () => {
   });
 
   it('should return false when Lace is not available', async () => {
-    mockTabsQuery.mockResolvedValue([{ id: 1, url: 'https://example.com' }]);
-    mockTabsSendMessage.mockResolvedValue({ laceAvailable: false });
+    mockIsLaceDetected.mockResolvedValue(false);
 
     const available = await isLaceAvailable();
 

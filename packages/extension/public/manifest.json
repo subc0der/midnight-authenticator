@@ -42,7 +42,11 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["page-api.js"],
+      "resources": [
+        "page-api.js",
+        "circuits/totp-verifier/zkir/*",
+        "circuits/totp-verifier/keys/*"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

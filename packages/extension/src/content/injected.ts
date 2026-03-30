@@ -24,6 +24,9 @@ type AllowedMessageType = typeof ALLOWED_MESSAGE_TYPES[number];
 // Pending Lace check requests (waiting for page context response)
 const pendingLaceChecks = new Map<string, (response: { laceAvailable: boolean; proverUri?: string }) => void>();
 
+// Pending Lace method calls (waiting for page context response)
+const pendingLaceCalls = new Map<string, (response: { success: boolean; result?: unknown; error?: string }) => void>();
+
 // Listen for Lace status from page context
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin) return;
@@ -38,6 +41,19 @@ window.addEventListener('message', (event) => {
       callback({
         laceAvailable: message.laceAvailable,
         proverUri: message.proverUri,
+      });
+    }
+  }
+
+  // Handle Lace method call response from page context
+  if (message.type === 'LACE_RESPONSE') {
+    const callback = pendingLaceCalls.get(message.requestId);
+    if (callback) {
+      pendingLaceCalls.delete(message.requestId);
+      callback({
+        success: message.success,
+        result: message.result,
+        error: message.error,
       });
     }
   }
@@ -65,6 +81,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       type: 'CHECK_LACE_STATUS',
       source: `${INJECTED_EXTENSION_ID}-content`,
       requestId,
+    }, window.location.origin);
+
+    return true; // Keep channel open for async response
+  }
+
+  // Handle Lace method calls from background
+  if (message.type === 'LACE_CALL') {
+    const { method, args, requestId, networkId } = message;
+
+    // Set up timeout (proof generation can be slow)
+    const timeoutId = setTimeout(() => {
+      pendingLaceCalls.delete(requestId);
+      sendResponse({ success: false, error: 'Lace call timed out' });
+    }, 60_000); // 60 second timeout
+
+    pendingLaceCalls.set(requestId, (response) => {
+      clearTimeout(timeoutId);
+      sendResponse(response);
+    });
+
+    // Forward to page context
+    window.postMessage({
+      type: 'LACE_CALL',
+      source: `${INJECTED_EXTENSION_ID}-content`,
+      requestId,
+      method,
+      args,
+      networkId: networkId || 'preprod',
     }, window.location.origin);
 
     return true; // Keep channel open for async response

@@ -179,47 +179,39 @@ window.addEventListener('message', (event) => {
     // Handle Lace status check (may involve async operations)
     checkLaceStatus(message.requestId);
   }
+
+  if (message.type === 'LACE_CALL') {
+    // Handle Lace wallet method call
+    handleLaceCall(message.requestId, message.method, message.args, message.networkId || 'preprod');
+  }
 });
 
 /**
  * Check Lace wallet status and respond via postMessage.
- * Handles both sync and async serviceUriConfig methods.
+ * Connects to wallet and gets configuration to verify availability.
  */
 async function checkLaceStatus(requestId: string): Promise<void> {
   const midnight = (window as any).midnight;
 
-  // Lace exposes wallets as UUID keys in window.midnight
-  // Find the first available wallet API
   let laceAvailable = false;
   let proverUri: string | undefined;
-  let walletApi: any = null;
 
   if (midnight && typeof midnight === 'object') {
-    // Look for wallet APIs (they have UUID keys)
-    for (const key of Object.keys(midnight)) {
-      const api = midnight[key];
-      if (api && typeof api === 'object') {
-        // Check if it's a Midnight wallet API (has apiVersion, name, etc.)
-        if (api.apiVersion || api.enable || api.state) {
-          walletApi = api;
-          laceAvailable = true;
-          break;
-        }
-      }
-    }
+    // Find Lace wallet by name (prefer 'lace' over other wallets)
+    const wallets = Object.values(midnight) as any[];
+    const laceWallet = wallets.find(w => w?.name === 'lace' && typeof w?.connect === 'function');
 
-    // Try to get prover URI from the wallet
-    // Handle both sync and async serviceUriConfig (Lace API may vary)
-    if (walletApi && typeof walletApi.serviceUriConfig === 'function') {
+    if (laceWallet) {
+      laceAvailable = true;
+      // Try to connect and get configuration
       try {
-        const configOrPromise = walletApi.serviceUriConfig();
-        // Check if it's a Promise and await it
-        const config = (configOrPromise && typeof configOrPromise.then === 'function')
-          ? await configOrPromise
-          : configOrPromise;
-        proverUri = config?.proverServerUri;
+        const connectedApi = await laceWallet.connect('preprod');
+        if (connectedApi && typeof connectedApi.getConfiguration === 'function') {
+          const config = await connectedApi.getConfiguration();
+          proverUri = config?.proverServerUri;
+        }
       } catch {
-        // Ignore errors getting config
+        // Wallet detected but couldn't connect - still mark as available
       }
     }
   }
@@ -231,6 +223,99 @@ async function checkLaceStatus(requestId: string): Promise<void> {
     laceAvailable,
     proverUri,
   }, window.location.origin);
+}
+
+// Cache for connected Lace wallet APIs (keyed by networkId)
+const connectedWalletCache = new Map<string, { api: any; connectedAt: number }>();
+const WALLET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Handle a Lace wallet method call from the content script.
+ * This runs in page context, so it CAN access window.midnight.
+ *
+ * Lace v4.0.1 flow:
+ * 1. Find wallet entry in window.midnight[uuid]
+ * 2. Call wallet.connect(networkId) to get connected API
+ * 3. Call the requested method on the connected API
+ */
+async function handleLaceCall(
+  requestId: string,
+  method: string,
+  args: unknown[],
+  networkId: string
+): Promise<void> {
+  const sendResponse = (success: boolean, result?: unknown, error?: string) => {
+    window.postMessage({
+      type: 'LACE_RESPONSE',
+      source: `${PAGE_API_EXTENSION_ID}-page`,
+      requestId,
+      success,
+      result,
+      error,
+    }, window.location.origin);
+  };
+
+  try {
+    const midnight = (window as any).midnight;
+
+    if (!midnight || typeof midnight !== 'object') {
+      sendResponse(false, undefined, 'Lace wallet not available (window.midnight not found)');
+      return;
+    }
+
+    // Find Lace wallet by name (prefer 'lace' over other wallets like '1am')
+    let walletEntry: any = null;
+    const wallets = Object.values(midnight);
+    // First try to find Lace specifically
+    walletEntry = wallets.find((w: any) => w?.name === 'lace' && typeof w?.connect === 'function');
+    // Fall back to any wallet with connect method
+    if (!walletEntry) {
+      walletEntry = wallets.find((w: any) => typeof w?.connect === 'function');
+    }
+
+    if (!walletEntry) {
+      sendResponse(false, undefined, 'No Midnight wallet found in window.midnight');
+      return;
+    }
+
+    // Check cache for connected API
+    let connectedApi: any;
+    const cached = connectedWalletCache.get(networkId);
+    if (cached && Date.now() - cached.connectedAt < WALLET_CACHE_TTL_MS) {
+      connectedApi = cached.api;
+    } else {
+      // Connect to get the full API
+      console.log(`[PageAPI] Connecting to Lace wallet on ${networkId}...`);
+      connectedApi = await walletEntry.connect(networkId);
+      connectedWalletCache.set(networkId, { api: connectedApi, connectedAt: Date.now() });
+      console.log('[PageAPI] Connected to Lace wallet');
+    }
+
+    if (!connectedApi) {
+      sendResponse(false, undefined, `Failed to connect to Lace wallet on ${networkId}`);
+      return;
+    }
+
+    // Get the method from connected API
+    const fn = connectedApi[method];
+    if (typeof fn !== 'function') {
+      sendResponse(false, undefined, `Method '${method}' not found on connected Lace API`);
+      return;
+    }
+
+    // Call the method
+    console.log(`[PageAPI] Calling Lace method: ${method}`, args);
+    const result = await fn.apply(connectedApi, args);
+    console.log(`[PageAPI] Lace method ${method} returned:`, result);
+
+    sendResponse(true, result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[PageAPI] Lace method ${method} failed:`, error);
+    // Clear cache on error (connection may have failed)
+    connectedWalletCache.delete(networkId);
+    sendResponse(false, undefined, message);
+  }
 }
 
 console.log('[PageAPI] window.midnightAuth is available');

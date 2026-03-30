@@ -182,6 +182,21 @@ importers:
       '@midnight-authenticator/core':
         specifier: workspace:*
         version: link:../core
+      '@midnight-ntwrk/compact-js':
+        specifier: 2.5.0
+        version: 2.5.0
+      '@midnight-ntwrk/compact-runtime':
+        specifier: 0.15.0
+        version: 0.15.0
+      '@midnight-ntwrk/midnight-js-contracts':
+        specifier: 4.0.2
+        version: 4.0.2
+      '@midnight-ntwrk/midnight-js-indexer-public-data-provider':
+        specifier: 4.0.2
+        version: 4.0.2(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@midnight-ntwrk/midnight-js-types':
+        specifier: 4.0.2
+        version: 4.0.2
       hash-wasm:
         specifier: ^4.12.0
         version: 4.12.0
