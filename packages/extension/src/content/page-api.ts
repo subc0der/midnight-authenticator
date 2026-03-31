@@ -170,6 +170,13 @@ const midnightAuth: MidnightAuthAPI = {
 // Wallet priority: 1AM first (server-side proving), then Lace (local Docker)
 const WALLET_PRIORITY = ['1am', 'lace'] as const;
 
+// Security: Expected RDNS (reverse domain name) patterns for trusted wallets
+// This helps prevent wallet spoofing attacks where malicious scripts inject fake wallets
+const TRUSTED_WALLET_RDNS: Record<string, string[]> = {
+  '1am': ['xyz.1am', 'com.1am'],
+  'lace': ['io.lace', 'io.lace.midnight'],
+};
+
 // Listen for wallet status check from content script
 // This runs in page context so it CAN see window.midnight
 window.addEventListener('message', (event) => {
@@ -190,27 +197,65 @@ window.addEventListener('message', (event) => {
 });
 
 /**
+ * Verify a wallet's RDNS matches expected patterns.
+ * Returns true if wallet is trusted, false if potentially spoofed.
+ */
+function isWalletTrusted(wallet: any, expectedName: string): boolean {
+  const rdns = wallet?.rdns;
+
+  // If no RDNS, wallet might be older version - allow with warning
+  if (!rdns || typeof rdns !== 'string') {
+    console.warn(`[PageAPI] Wallet '${expectedName}' has no RDNS - cannot verify authenticity`);
+    return true; // Allow for backward compatibility, but log warning
+  }
+
+  const trustedPatterns = TRUSTED_WALLET_RDNS[expectedName];
+  if (!trustedPatterns) {
+    // Unknown wallet type - no RDNS verification possible
+    return true;
+  }
+
+  const isTrusted = trustedPatterns.some(pattern =>
+    rdns === pattern || rdns.startsWith(pattern + '.')
+  );
+
+  if (!isTrusted) {
+    console.error(`[PageAPI] SECURITY: Wallet '${expectedName}' has unexpected RDNS '${rdns}'. Expected: ${trustedPatterns.join(' or ')}. Possible spoofing attempt.`);
+  }
+
+  return isTrusted;
+}
+
+/**
  * Find the best available wallet based on priority.
  * Priority: 1AM (server-side proving) > Lace (local Docker)
+ *
+ * Security: Verifies wallet RDNS to prevent spoofing attacks.
  */
 function findBestWallet(midnight: any): { wallet: any; name: string } | null {
   if (!midnight || typeof midnight !== 'object') return null;
 
   const wallets = Object.values(midnight) as any[];
 
-  // Check wallets in priority order
+  // Check wallets in priority order, with RDNS verification
   for (const preferredName of WALLET_PRIORITY) {
     const wallet = wallets.find(
       (w: any) => w?.name === preferredName && typeof w?.connect === 'function'
     );
     if (wallet) {
+      // Security: Verify RDNS before trusting wallet
+      if (!isWalletTrusted(wallet, preferredName)) {
+        console.warn(`[PageAPI] Skipping untrusted wallet '${preferredName}'`);
+        continue; // Skip this wallet, try next in priority
+      }
       return { wallet, name: preferredName };
     }
   }
 
-  // Fallback: any wallet with connect method
+  // Fallback: any wallet with connect method (no RDNS verification for unknown wallets)
   const anyWallet = wallets.find((w: any) => typeof w?.connect === 'function');
   if (anyWallet) {
+    console.warn(`[PageAPI] Using unknown wallet '${anyWallet.name}' - no RDNS verification`);
     return { wallet: anyWallet, name: anyWallet.name || 'unknown' };
   }
 
