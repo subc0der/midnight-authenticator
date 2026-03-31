@@ -328,6 +328,23 @@ async function handleWalletCall(
       return;
     }
 
+    // Security: Only allow specific wallet methods to prevent method injection
+    const ALLOWED_METHODS = [
+      'getConfiguration',
+      'getUnshieldedAddress',
+      'getDustAddress',
+      'getShieldedAddresses',
+      'balanceSealedTransaction',
+      'balanceUnsealedTransaction',
+      'submitTransaction',
+      'getProvingProvider',
+    ];
+
+    if (!ALLOWED_METHODS.includes(method)) {
+      sendResponse(false, undefined, `Method '${method}' is not allowed`, walletName);
+      return;
+    }
+
     // Get the method from connected API
     const fn = connectedApi[method];
     if (typeof fn !== 'function') {
