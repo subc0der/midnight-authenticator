@@ -362,9 +362,7 @@ pnpm dev
 
 ## Contributing
 
-Contributions welcome! Please read the security notes in `.claude/context/security-learnings.md` before contributing security-sensitive code.
-
-This project has undergone 9 security-focused code reviews. Key patterns:
+Contributions welcome! This project has undergone multiple security-focused code reviews. Key patterns:
 - All auth requests require explicit user approval (no silent proof generation)
 - Secrets zeroed after use (`secret.fill(0)`)
 - Origin validation via `sender.origin`, not message payload
