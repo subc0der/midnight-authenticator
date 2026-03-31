@@ -32,7 +32,7 @@ const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 
 // Robust base64 encoding/decoding for binary data
-// (Gemini Review #2: Medium Priority - Base64 Encoding Implementation)
+// Security: Base64 encoding for safe storage
 function uint8ArrayToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000; // Process in chunks to avoid call stack issues
@@ -138,7 +138,7 @@ async function deriveKeyViaOffscreen(password: string, salt: Uint8Array): Promis
     return new Uint8Array(response.keyBytes);
   } finally {
     // Close offscreen document after use to reduce attack surface
-    // (Gemini Review #2: High Priority - Offscreen Document Persistence)
+    // Security: Offscreen document persistence for key derivation
     await closeOffscreenDocument();
   }
 }

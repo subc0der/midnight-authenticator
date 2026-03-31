@@ -26,7 +26,7 @@ export ledger authCount: Counter;                             // Analytics
 witness getSecret(): Bytes<32>;
 witness getBlinder(): Bytes<32>;
 // Note: timeWindow is now a PUBLIC input (expectedTimeWindow parameter)
-// This fixes the "unconstrained timeWindow" issue from Gemini review.
+// This fixes the "unconstrained timeWindow" issue from security review.
 
 /**
  * Register a new account with commitment.
@@ -50,7 +50,7 @@ export circuit registerAccount(accountId: Bytes<32>, commitment: Bytes<32>): [] 
  * - secret/blinder are PRIVATE (from witness)
  * - authCode binds the proof to the specific time window
  *
- * FIX: Gemini review identified that unused authCode didn't constrain the proof.
+ * FIX: Security review identified that unused authCode didn't constrain the proof.
  * Now expectedTimeWindow is a public input, and authCode computation uses it.
  */
 export circuit authenticate(

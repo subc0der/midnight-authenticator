@@ -11,7 +11,7 @@ const INJECTED_EXTENSION_ID = 'midnight-authenticator';
 // SECURITY: Only safe message types are allowed from dApps.
 // Proof-related operations that don't expose secrets are safe.
 // GET_ACCOUNTS removed - was a privacy leak (any site could enumerate user's accounts)
-// See: subcoder/gemini/REVIEW_FEEDBACK.md - Critical Issue #2
+// Security fix: Prevents privacy leak where any site could enumerate user accounts
 const ALLOWED_MESSAGE_TYPES = [
   'AUTH_REQUEST',       // Requires popup approval
   'REGISTER_ACCOUNT',   // Requires popup approval
