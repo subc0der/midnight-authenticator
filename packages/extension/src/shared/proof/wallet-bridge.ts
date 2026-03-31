@@ -4,18 +4,19 @@
  * Type-safe interface for calling Midnight wallet methods from the background
  * service worker via content script messaging.
  *
- * Supports multiple wallets via the DApp Connector API:
+ * Supports multiple wallets via the DApp Connector API v4:
  * - 1AM (preferred): Server-side proving via ProofStation, no Docker required
  * - Lace: Local proving via Docker proof server
  *
- * API structure (both wallets):
- * - window.midnight[uuid] = { apiVersion, name, connect(networkId) }
- * - connect('preprod') returns the full wallet API
+ * Wallet discovery in window.midnight:
+ * - 1AM: Fixed key at window.midnight['1am']
+ * - Lace: Random UUID keys, found by checking .name === 'lace'
  *
  * Flow:
  *   Background SW → chrome.tabs.sendMessage(WALLET_CALL) → Content Script
  *   Content Script → window.postMessage → Page Context
- *   Page Context → window.midnight[uuid].connect() → ConnectedAPI
+ *   Page Context → findBestWallet() discovers wallet
+ *   Page Context → wallet.connect('preprod') → ConnectedAPI
  *   Page Context → ConnectedAPI[method]() → Result
  *   Page Context → window.postMessage → Content Script
  *   Content Script → sendResponse → Background SW
@@ -58,18 +59,23 @@ export interface WalletConnectedAPI {
 
 /**
  * Methods available on the initial wallet object (before connect).
+ * Based on Midnight DApp Connector API v4.
  */
 export interface WalletEntry {
   apiVersion: string;
   name: string;
   icon: string;
-  rdns: string;
+  rdns?: string; // Reverse domain name (metadata, not used for security)
   connect(networkId: string): Promise<WalletConnectedAPI>;
 }
 
 /**
  * Supported wallet names in priority order.
- * 1AM is preferred because it offers server-side proving (no Docker required).
+ * 1AM is preferred because it offers server-side proving via ProofStation (no Docker required).
+ *
+ * Discovery patterns:
+ * - 1AM: Fixed key at window.midnight['1am']
+ * - Lace: Random UUID keys, find by .name === 'lace'
  */
 export const WALLET_PRIORITY = ['1am', 'lace'] as const;
 export type WalletName = (typeof WALLET_PRIORITY)[number];

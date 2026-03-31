@@ -167,15 +167,12 @@ const midnightAuth: MidnightAuthAPI = {
 // Expose to page
 (window as unknown as { midnightAuth: MidnightAuthAPI }).midnightAuth = midnightAuth;
 
-// Wallet priority: 1AM first (server-side proving), then Lace (local Docker)
+// Wallet discovery:
+// - 1AM: Fixed key at window.midnight['1am']
+// - Lace: Random UUID keys, find by checking .name === 'lace'
+// Priority: 1AM (server-side ProofStation) > Lace (local Docker proving)
 const WALLET_PRIORITY = ['1am', 'lace'] as const;
-
-// Security: Expected RDNS (reverse domain name) patterns for trusted wallets
-// This helps prevent wallet spoofing attacks where malicious scripts inject fake wallets
-const TRUSTED_WALLET_RDNS: Record<string, string[]> = {
-  '1am': ['xyz.1am', 'com.1am'],
-  'lace': ['io.lace', 'io.lace.midnight'],
-};
+type WalletName = (typeof WALLET_PRIORITY)[number];
 
 // Listen for wallet status check from content script
 // This runs in page context so it CAN see window.midnight
@@ -197,66 +194,39 @@ window.addEventListener('message', (event) => {
 });
 
 /**
- * Verify a wallet's RDNS matches expected patterns.
- * Returns true if wallet is trusted, false if potentially spoofed.
- */
-function isWalletTrusted(wallet: any, expectedName: string): boolean {
-  const rdns = wallet?.rdns;
-
-  // If no RDNS, wallet might be older version - allow with warning
-  if (!rdns || typeof rdns !== 'string') {
-    console.warn(`[PageAPI] Wallet '${expectedName}' has no RDNS - cannot verify authenticity`);
-    return true; // Allow for backward compatibility, but log warning
-  }
-
-  const trustedPatterns = TRUSTED_WALLET_RDNS[expectedName];
-  if (!trustedPatterns) {
-    // Unknown wallet type - no RDNS verification possible
-    return true;
-  }
-
-  const isTrusted = trustedPatterns.some(pattern =>
-    rdns === pattern || rdns.startsWith(pattern + '.')
-  );
-
-  if (!isTrusted) {
-    console.error(`[PageAPI] SECURITY: Wallet '${expectedName}' has unexpected RDNS '${rdns}'. Expected: ${trustedPatterns.join(' or ')}. Possible spoofing attempt.`);
-  }
-
-  return isTrusted;
-}
-
-/**
  * Find the best available wallet based on priority.
- * Priority: 1AM (server-side proving) > Lace (local Docker)
+ * Priority: 1AM (server-side ProofStation) > Lace (local Docker)
  *
- * Security: Verifies wallet RDNS to prevent spoofing attacks.
+ * Discovery patterns:
+ * - 1AM: Fixed key at window.midnight['1am']
+ * - Lace: Random UUID keys, find by .name === 'lace'
  */
-function findBestWallet(midnight: any): { wallet: any; name: string } | null {
+function findBestWallet(midnight: any): { wallet: any; name: WalletName | string } | null {
   if (!midnight || typeof midnight !== 'object') return null;
 
-  const wallets = Object.values(midnight) as any[];
+  // 1. Check for 1AM at its fixed key
+  const oneAmWallet = midnight['1am'];
+  if (oneAmWallet && typeof oneAmWallet.connect === 'function') {
+    console.log(`[PageAPI] Found 1AM wallet at window.midnight['1am']`);
+    return { wallet: oneAmWallet, name: '1am' };
+  }
 
-  // Check wallets in priority order, with RDNS verification
-  for (const preferredName of WALLET_PRIORITY) {
-    const wallet = wallets.find(
-      (w: any) => w?.name === preferredName && typeof w?.connect === 'function'
-    );
-    if (wallet) {
-      // Security: Verify RDNS before trusting wallet
-      if (!isWalletTrusted(wallet, preferredName)) {
-        console.warn(`[PageAPI] Skipping untrusted wallet '${preferredName}'`);
-        continue; // Skip this wallet, try next in priority
-      }
-      return { wallet, name: preferredName };
+  // 2. Check for Lace by iterating (uses random UUID keys)
+  for (const [key, value] of Object.entries(midnight)) {
+    const wallet = value as any;
+    if (wallet?.name === 'lace' && typeof wallet.connect === 'function') {
+      console.log(`[PageAPI] Found Lace wallet at window.midnight['${key}']`);
+      return { wallet, name: 'lace' };
     }
   }
 
-  // Fallback: any wallet with connect method (no RDNS verification for unknown wallets)
-  const anyWallet = wallets.find((w: any) => typeof w?.connect === 'function');
-  if (anyWallet) {
-    console.warn(`[PageAPI] Using unknown wallet '${anyWallet.name}' - no RDNS verification`);
-    return { wallet: anyWallet, name: anyWallet.name || 'unknown' };
+  // 3. Fallback: any wallet with connect method (future wallets)
+  for (const [key, value] of Object.entries(midnight)) {
+    const wallet = value as any;
+    if (wallet && typeof wallet.connect === 'function') {
+      console.warn(`[PageAPI] Using unknown wallet '${wallet.name || key}' at window.midnight['${key}']`);
+      return { wallet, name: wallet.name || key };
+    }
   }
 
   return null;
@@ -300,7 +270,8 @@ async function checkWalletStatus(requestId: string): Promise<void> {
   }, window.location.origin);
 }
 
-// Cache for connected wallet APIs (keyed by networkId)
+// Cache for connected wallet APIs (keyed by networkId:walletName)
+// Using composite key ensures we reconnect if a different wallet becomes available
 const connectedWalletCache = new Map<string, { api: any; walletName: string; connectedAt: number }>();
 const WALLET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -348,24 +319,24 @@ async function handleWalletCall(
       return;
     }
 
-    // Check cache for connected API
+    // Check cache for connected API (keyed by networkId:walletName)
     let connectedApi: any;
-    let walletName = found.name;
-    const cached = connectedWalletCache.get(networkId);
+    const walletName = found.name;
+    const cacheKey = `${networkId}:${walletName}`;
+    const cached = connectedWalletCache.get(cacheKey);
 
     if (cached && Date.now() - cached.connectedAt < WALLET_CACHE_TTL_MS) {
       connectedApi = cached.api;
-      walletName = cached.walletName;
     } else {
       // Connect to get the full API
-      console.log(`[PageAPI] Connecting to ${found.name} wallet on ${networkId}...`);
+      console.log(`[PageAPI] Connecting to ${walletName} wallet on ${networkId}...`);
       connectedApi = await found.wallet.connect(networkId);
-      connectedWalletCache.set(networkId, {
+      connectedWalletCache.set(cacheKey, {
         api: connectedApi,
-        walletName: found.name,
+        walletName,
         connectedAt: Date.now(),
       });
-      console.log(`[PageAPI] Connected to ${found.name} wallet`);
+      console.log(`[PageAPI] Connected to ${walletName} wallet`);
     }
 
     if (!connectedApi) {
@@ -406,8 +377,12 @@ async function handleWalletCall(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[PageAPI] Wallet method ${method} failed:`, error);
-    // Clear cache on error (connection may have failed)
-    connectedWalletCache.delete(networkId);
+    // Clear all caches for this network on error (connection may have failed)
+    for (const key of connectedWalletCache.keys()) {
+      if (key.startsWith(`${networkId}:`)) {
+        connectedWalletCache.delete(key);
+      }
+    }
     sendResponse(false, undefined, message);
   }
 }
