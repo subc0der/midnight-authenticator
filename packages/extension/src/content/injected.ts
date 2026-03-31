@@ -21,89 +21,114 @@ const ALLOWED_MESSAGE_TYPES = [
 
 type AllowedMessageType = typeof ALLOWED_MESSAGE_TYPES[number];
 
-// Pending Lace check requests (waiting for page context response)
-const pendingLaceChecks = new Map<string, (response: { laceAvailable: boolean; proverUri?: string }) => void>();
+// Pending wallet check requests (waiting for page context response)
+const pendingWalletChecks = new Map<string, (response: { walletAvailable: boolean; walletName?: string; proverUri?: string }) => void>();
 
-// Pending Lace method calls (waiting for page context response)
-const pendingLaceCalls = new Map<string, (response: { success: boolean; result?: unknown; error?: string }) => void>();
+// Pending wallet method calls (waiting for page context response)
+const pendingWalletCalls = new Map<string, (response: { success: boolean; result?: unknown; error?: string; walletName?: string }) => void>();
 
-// Listen for Lace status from page context
+// Listen for wallet status from page context
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin) return;
 
   const message = event.data;
   if (!message || message.source !== `${INJECTED_EXTENSION_ID}-page`) return;
 
-  if (message.type === 'LACE_STATUS_RESPONSE') {
-    const callback = pendingLaceChecks.get(message.requestId);
+  if (message.type === 'WALLET_STATUS_RESPONSE') {
+    const callback = pendingWalletChecks.get(message.requestId);
     if (callback) {
-      pendingLaceChecks.delete(message.requestId);
+      pendingWalletChecks.delete(message.requestId);
       callback({
-        laceAvailable: message.laceAvailable,
+        walletAvailable: message.walletAvailable,
+        walletName: message.walletName,
         proverUri: message.proverUri,
       });
     }
   }
 
-  // Handle Lace method call response from page context
-  if (message.type === 'LACE_RESPONSE') {
-    const callback = pendingLaceCalls.get(message.requestId);
+  // Handle wallet method call response from page context
+  if (message.type === 'WALLET_RESPONSE') {
+    const callback = pendingWalletCalls.get(message.requestId);
     if (callback) {
-      pendingLaceCalls.delete(message.requestId);
+      pendingWalletCalls.delete(message.requestId);
       callback({
         success: message.success,
         result: message.result,
         error: message.error,
+        walletName: message.walletName,
       });
     }
   }
 });
 
-// Listen for messages from background (for Lace detection and auth completion)
+// Listen for messages from background (for wallet detection and auth completion)
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'CHECK_LACE_AVAILABLE') {
-    // Ask page context to check for Lace (content script can't see page's window.midnight)
-    const requestId = `lace-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Handle wallet availability check (new unified message)
+  if (message.type === 'CHECK_WALLET_AVAILABLE') {
+    const requestId = `wallet-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    // Set up response handler
     const timeoutId = setTimeout(() => {
-      pendingLaceChecks.delete(requestId);
-      sendResponse({ laceAvailable: false });
+      pendingWalletChecks.delete(requestId);
+      sendResponse({ walletAvailable: false });
     }, 1000);
 
-    pendingLaceChecks.set(requestId, (response) => {
+    pendingWalletChecks.set(requestId, (response) => {
       clearTimeout(timeoutId);
       sendResponse(response);
     });
 
-    // Ask page context
     window.postMessage({
-      type: 'CHECK_LACE_STATUS',
+      type: 'CHECK_WALLET_STATUS',
       source: `${INJECTED_EXTENSION_ID}-content`,
       requestId,
     }, window.location.origin);
 
-    return true; // Keep channel open for async response
+    return true;
   }
 
-  // Handle Lace method calls from background
-  if (message.type === 'LACE_CALL') {
+  // Legacy: CHECK_LACE_AVAILABLE (backward compatibility)
+  if (message.type === 'CHECK_LACE_AVAILABLE') {
+    const requestId = `wallet-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const timeoutId = setTimeout(() => {
+      pendingWalletChecks.delete(requestId);
+      sendResponse({ laceAvailable: false });
+    }, 1000);
+
+    pendingWalletChecks.set(requestId, (response) => {
+      clearTimeout(timeoutId);
+      // Map new response format to legacy format
+      sendResponse({
+        laceAvailable: response.walletAvailable,
+        proverUri: response.proverUri,
+      });
+    });
+
+    window.postMessage({
+      type: 'CHECK_WALLET_STATUS',
+      source: `${INJECTED_EXTENSION_ID}-content`,
+      requestId,
+    }, window.location.origin);
+
+    return true;
+  }
+
+  // Handle wallet method calls from background (new unified message)
+  if (message.type === 'WALLET_CALL') {
     const { method, args, requestId, networkId } = message;
 
-    // Set up timeout (proof generation can be slow)
     const timeoutId = setTimeout(() => {
-      pendingLaceCalls.delete(requestId);
-      sendResponse({ success: false, error: 'Lace call timed out' });
-    }, 60_000); // 60 second timeout
+      pendingWalletCalls.delete(requestId);
+      sendResponse({ success: false, error: 'Wallet call timed out' });
+    }, 60_000);
 
-    pendingLaceCalls.set(requestId, (response) => {
+    pendingWalletCalls.set(requestId, (response) => {
       clearTimeout(timeoutId);
       sendResponse(response);
     });
 
-    // Forward to page context
     window.postMessage({
-      type: 'LACE_CALL',
+      type: 'WALLET_CALL',
       source: `${INJECTED_EXTENSION_ID}-content`,
       requestId,
       method,
@@ -111,7 +136,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       networkId: networkId || 'preprod',
     }, window.location.origin);
 
-    return true; // Keep channel open for async response
+    return true;
+  }
+
+  // Legacy: LACE_CALL (backward compatibility)
+  if (message.type === 'LACE_CALL') {
+    const { method, args, requestId, networkId } = message;
+
+    const timeoutId = setTimeout(() => {
+      pendingWalletCalls.delete(requestId);
+      sendResponse({ success: false, error: 'Wallet call timed out' });
+    }, 60_000);
+
+    pendingWalletCalls.set(requestId, (response) => {
+      clearTimeout(timeoutId);
+      sendResponse(response);
+    });
+
+    window.postMessage({
+      type: 'WALLET_CALL',
+      source: `${INJECTED_EXTENSION_ID}-content`,
+      requestId,
+      method,
+      args,
+      networkId: networkId || 'preprod',
+    }, window.location.origin);
+
+    return true;
   }
 
   // Relay auth completion from background to page

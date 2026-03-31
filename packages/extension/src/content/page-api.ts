@@ -167,7 +167,10 @@ const midnightAuth: MidnightAuthAPI = {
 // Expose to page
 (window as unknown as { midnightAuth: MidnightAuthAPI }).midnightAuth = midnightAuth;
 
-// Listen for Lace status check from content script
+// Wallet priority: 1AM first (server-side proving), then Lace (local Docker)
+const WALLET_PRIORITY = ['1am', 'lace'] as const;
+
+// Listen for wallet status check from content script
 // This runs in page context so it CAN see window.midnight
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin) return;
@@ -175,83 +178,113 @@ window.addEventListener('message', (event) => {
   const message = event.data;
   if (!message || message.source !== `${PAGE_API_EXTENSION_ID}-content`) return;
 
-  if (message.type === 'CHECK_LACE_STATUS') {
-    // Handle Lace status check (may involve async operations)
-    checkLaceStatus(message.requestId);
+  if (message.type === 'CHECK_WALLET_STATUS') {
+    // Handle wallet status check (may involve async operations)
+    checkWalletStatus(message.requestId);
   }
 
-  if (message.type === 'LACE_CALL') {
-    // Handle Lace wallet method call
-    handleLaceCall(message.requestId, message.method, message.args, message.networkId || 'preprod');
+  if (message.type === 'WALLET_CALL') {
+    // Handle wallet method call
+    handleWalletCall(message.requestId, message.method, message.args, message.networkId || 'preprod');
   }
 });
 
 /**
- * Check Lace wallet status and respond via postMessage.
- * Connects to wallet and gets configuration to verify availability.
+ * Find the best available wallet based on priority.
+ * Priority: 1AM (server-side proving) > Lace (local Docker)
  */
-async function checkLaceStatus(requestId: string): Promise<void> {
+function findBestWallet(midnight: any): { wallet: any; name: string } | null {
+  if (!midnight || typeof midnight !== 'object') return null;
+
+  const wallets = Object.values(midnight) as any[];
+
+  // Check wallets in priority order
+  for (const preferredName of WALLET_PRIORITY) {
+    const wallet = wallets.find(
+      (w: any) => w?.name === preferredName && typeof w?.connect === 'function'
+    );
+    if (wallet) {
+      return { wallet, name: preferredName };
+    }
+  }
+
+  // Fallback: any wallet with connect method
+  const anyWallet = wallets.find((w: any) => typeof w?.connect === 'function');
+  if (anyWallet) {
+    return { wallet: anyWallet, name: anyWallet.name || 'unknown' };
+  }
+
+  return null;
+}
+
+/**
+ * Check wallet status and respond via postMessage.
+ * Connects to best available wallet and gets configuration.
+ */
+async function checkWalletStatus(requestId: string): Promise<void> {
   const midnight = (window as any).midnight;
 
-  let laceAvailable = false;
+  let walletAvailable = false;
+  let walletName: string | undefined;
   let proverUri: string | undefined;
 
-  if (midnight && typeof midnight === 'object') {
-    // Find Lace wallet by name (prefer 'lace' over other wallets)
-    const wallets = Object.values(midnight) as any[];
-    const laceWallet = wallets.find(w => w?.name === 'lace' && typeof w?.connect === 'function');
+  const found = findBestWallet(midnight);
+  if (found) {
+    walletAvailable = true;
+    walletName = found.name;
 
-    if (laceWallet) {
-      laceAvailable = true;
-      // Try to connect and get configuration
-      try {
-        const connectedApi = await laceWallet.connect('preprod');
-        if (connectedApi && typeof connectedApi.getConfiguration === 'function') {
-          const config = await connectedApi.getConfiguration();
-          proverUri = config?.proverServerUri;
-        }
-      } catch {
-        // Wallet detected but couldn't connect - still mark as available
+    // Try to connect and get configuration
+    try {
+      const connectedApi = await found.wallet.connect('preprod');
+      if (connectedApi && typeof connectedApi.getConfiguration === 'function') {
+        const config = await connectedApi.getConfiguration();
+        proverUri = config?.proverServerUri;
       }
+    } catch {
+      // Wallet detected but couldn't connect - still mark as available
     }
   }
 
   window.postMessage({
-    type: 'LACE_STATUS_RESPONSE',
+    type: 'WALLET_STATUS_RESPONSE',
     source: `${PAGE_API_EXTENSION_ID}-page`,
     requestId,
-    laceAvailable,
+    walletAvailable,
+    walletName,
     proverUri,
   }, window.location.origin);
 }
 
-// Cache for connected Lace wallet APIs (keyed by networkId)
-const connectedWalletCache = new Map<string, { api: any; connectedAt: number }>();
+// Cache for connected wallet APIs (keyed by networkId)
+const connectedWalletCache = new Map<string, { api: any; walletName: string; connectedAt: number }>();
 const WALLET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Handle a Lace wallet method call from the content script.
+ * Handle a wallet method call from the content script.
  * This runs in page context, so it CAN access window.midnight.
  *
- * Lace v4.0.1 flow:
- * 1. Find wallet entry in window.midnight[uuid]
+ * Wallet priority: 1AM (server-side proving) > Lace (local Docker)
+ *
+ * Flow:
+ * 1. Find best wallet in window.midnight[uuid]
  * 2. Call wallet.connect(networkId) to get connected API
  * 3. Call the requested method on the connected API
  */
-async function handleLaceCall(
+async function handleWalletCall(
   requestId: string,
   method: string,
   args: unknown[],
   networkId: string
 ): Promise<void> {
-  const sendResponse = (success: boolean, result?: unknown, error?: string) => {
+  const sendResponse = (success: boolean, result?: unknown, error?: string, walletName?: string) => {
     window.postMessage({
-      type: 'LACE_RESPONSE',
+      type: 'WALLET_RESPONSE',
       source: `${PAGE_API_EXTENSION_ID}-page`,
       requestId,
       success,
       result,
       error,
+      walletName,
     }, window.location.origin);
   };
 
@@ -259,59 +292,58 @@ async function handleLaceCall(
     const midnight = (window as any).midnight;
 
     if (!midnight || typeof midnight !== 'object') {
-      sendResponse(false, undefined, 'Lace wallet not available (window.midnight not found)');
+      sendResponse(false, undefined, 'No Midnight wallet available (window.midnight not found)');
       return;
     }
 
-    // Find Lace wallet by name (prefer 'lace' over other wallets like '1am')
-    let walletEntry: any = null;
-    const wallets = Object.values(midnight);
-    // First try to find Lace specifically
-    walletEntry = wallets.find((w: any) => w?.name === 'lace' && typeof w?.connect === 'function');
-    // Fall back to any wallet with connect method
-    if (!walletEntry) {
-      walletEntry = wallets.find((w: any) => typeof w?.connect === 'function');
-    }
-
-    if (!walletEntry) {
+    // Find best wallet using priority system
+    const found = findBestWallet(midnight);
+    if (!found) {
       sendResponse(false, undefined, 'No Midnight wallet found in window.midnight');
       return;
     }
 
     // Check cache for connected API
     let connectedApi: any;
+    let walletName = found.name;
     const cached = connectedWalletCache.get(networkId);
+
     if (cached && Date.now() - cached.connectedAt < WALLET_CACHE_TTL_MS) {
       connectedApi = cached.api;
+      walletName = cached.walletName;
     } else {
       // Connect to get the full API
-      console.log(`[PageAPI] Connecting to Lace wallet on ${networkId}...`);
-      connectedApi = await walletEntry.connect(networkId);
-      connectedWalletCache.set(networkId, { api: connectedApi, connectedAt: Date.now() });
-      console.log('[PageAPI] Connected to Lace wallet');
+      console.log(`[PageAPI] Connecting to ${found.name} wallet on ${networkId}...`);
+      connectedApi = await found.wallet.connect(networkId);
+      connectedWalletCache.set(networkId, {
+        api: connectedApi,
+        walletName: found.name,
+        connectedAt: Date.now(),
+      });
+      console.log(`[PageAPI] Connected to ${found.name} wallet`);
     }
 
     if (!connectedApi) {
-      sendResponse(false, undefined, `Failed to connect to Lace wallet on ${networkId}`);
+      sendResponse(false, undefined, `Failed to connect to ${walletName} wallet on ${networkId}`, walletName);
       return;
     }
 
     // Get the method from connected API
     const fn = connectedApi[method];
     if (typeof fn !== 'function') {
-      sendResponse(false, undefined, `Method '${method}' not found on connected Lace API`);
+      sendResponse(false, undefined, `Method '${method}' not found on ${walletName} wallet API`, walletName);
       return;
     }
 
     // Call the method
-    console.log(`[PageAPI] Calling Lace method: ${method}`, args);
+    console.log(`[PageAPI] Calling ${walletName} wallet method: ${method}`, args);
     const result = await fn.apply(connectedApi, args);
-    console.log(`[PageAPI] Lace method ${method} returned:`, result);
+    console.log(`[PageAPI] ${walletName} wallet method ${method} returned:`, result);
 
-    sendResponse(true, result);
+    sendResponse(true, result, undefined, walletName);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[PageAPI] Lace method ${method} failed:`, error);
+    console.error(`[PageAPI] Wallet method ${method} failed:`, error);
     // Clear cache on error (connection may have failed)
     connectedWalletCache.delete(networkId);
     sendResponse(false, undefined, message);

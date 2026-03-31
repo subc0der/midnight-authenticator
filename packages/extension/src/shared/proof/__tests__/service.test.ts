@@ -119,8 +119,8 @@ describe('ProofService', () => {
 
       const result = await service.generateProof(request);
 
-      expect(result.error).toContain('Install Lace wallet');
-      expect(result.error).toContain('docker');
+      expect(result.error).toContain('Install 1AM wallet');
+      expect(result.error).toContain('Lace');
       expect(result.error).toContain('Mock provider');
     });
 
@@ -131,7 +131,8 @@ describe('ProofService', () => {
 
       const result = await service.generateProof(request);
 
-      expect(result.error).toContain('Lace wallet');
+      expect(result.error).toContain('1AM');
+      expect(result.error).toContain('Lace');
       expect(result.error).not.toContain('Mock provider');
     });
 

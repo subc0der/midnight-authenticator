@@ -2,7 +2,7 @@
  * Proof Generation Module
  *
  * Provides ZK proof generation with multiple backend support:
- * - LaceProofProvider: Lace wallet integration
+ * - WalletProofProvider: Midnight wallet integration (1AM preferred, Lace fallback)
  * - HttpProofProvider: Docker proof server
  * - MockProofProvider: Development/demos
  */
@@ -22,7 +22,16 @@ export type {
 // Providers
 export { MockProofProvider, isMockProof } from './mock-provider.js';
 export { HttpProofProvider, createHttpProofProvider } from './http-provider.js';
-export { LaceProofProvider, createLaceProofProvider, isLaceAvailable } from './lace-provider.js';
+export {
+  WalletProofProvider,
+  createWalletProofProvider,
+  isWalletAvailable,
+  invalidateWalletCache,
+  // Legacy exports for backward compatibility
+  LaceProofProvider,
+  createLaceProofProvider,
+  isLaceAvailable,
+} from './wallet-provider.js';
 
 // Service
 export { ProofService, getProofService, resetProofService } from './service.js';

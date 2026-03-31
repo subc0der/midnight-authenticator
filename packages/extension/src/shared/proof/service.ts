@@ -2,9 +2,13 @@
  * Proof Service Manager
  *
  * Coordinates proof generation across multiple providers with automatic fallback:
- * 1. LaceProofProvider - Try Lace wallet first (future-ready)
+ * 1. WalletProofProvider - Try wallet first (1AM preferred, Lace fallback)
  * 2. HttpProofProvider - Fall back to local Docker proof server
  * 3. MockProofProvider - Last resort for development only
+ *
+ * Wallet Priority:
+ * - 1AM: Server-side proving via ProofStation (no Docker required, faster)
+ * - Lace: Local proving via Docker proof server
  *
  * The service automatically selects the best available provider
  * and handles errors gracefully with clear user feedback.
@@ -17,7 +21,7 @@ import type {
   ProofServiceConfig,
   ProofServiceStatus,
 } from './types.js';
-import { LaceProofProvider } from './lace-provider.js';
+import { WalletProofProvider } from './wallet-provider.js';
 import { HttpProofProvider } from './http-provider.js';
 import { MockProofProvider } from './mock-provider.js';
 
@@ -67,8 +71,9 @@ export class ProofService {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
     // Initialize providers in priority order
+    // WalletProofProvider handles wallet priority internally (1AM > Lace)
     this.providers = [
-      new LaceProofProvider(),
+      new WalletProofProvider(),
       new HttpProofProvider(this.config.proofServerUrl),
     ];
 
@@ -163,12 +168,12 @@ export class ProofService {
    * Get detailed status of all providers.
    */
   async getStatus(): Promise<ProofServiceStatus> {
-    // Check Lace detection (not usability - that requires prover URI)
-    const laceProvider = this.providers[0] as LaceProofProvider;
-    const laceDetected = await laceProvider?.isDetected?.() ?? false;
+    // Check wallet detection (not usability - that requires prover URI)
+    const walletProvider = this.providers[0] as WalletProofProvider;
+    const walletDetected = await walletProvider?.isDetected?.() ?? false;
 
     // Check which providers are available for actual use
-    const [laceUsable, mockAvailable] = await Promise.all([
+    const [walletUsable, mockAvailable] = await Promise.all([
       this.providers[0]?.isAvailable() ?? false,
       this.providers[2]?.isAvailable() ?? false,
     ]);
@@ -179,13 +184,13 @@ export class ProofService {
 
     // Determine active provider (what would actually be used for proofs)
     let activeProvider: string | null = null;
-    if (laceUsable) activeProvider = 'lace';
+    if (walletUsable) activeProvider = 'wallet';
     else if (mockAvailable) activeProvider = 'mock';
     // Note: HTTP not included until SDK integration is complete
 
     return {
       activeProvider,
-      laceAvailable: laceDetected, // Show if Lace is detected, not if usable
+      laceAvailable: walletDetected, // Show if wallet is detected (kept for API compatibility)
       proofServerAvailable,
       mockEnabled: isDevelopment() && this.config.allowMockProofs,
     };
@@ -198,15 +203,15 @@ export class ProofService {
     if (isDevelopment()) {
       return (
         'No proof provider available. Options:\n' +
-        '1. Install Lace wallet with Midnight enabled\n' +
-        '2. Start proof server: docker start proof-server\n' +
+        '1. Install 1AM wallet (recommended - no Docker required)\n' +
+        '2. Install Lace wallet with Midnight enabled\n' +
         '3. Mock provider should be available in development'
       );
     }
     return (
-      'No proof provider available. Please either:\n' +
-      '1. Install and configure Lace wallet for Midnight\n' +
-      '2. Run proof server: docker run -d --name proof-server -p 6300:6300 midnightntwrk/proof-server:8.0.3 midnight-proof-server -v'
+      'No proof provider available. Please install a Midnight wallet:\n' +
+      '1. 1AM (recommended): https://1am.xyz - No setup required\n' +
+      '2. Lace: Requires local Docker proof server'
     );
   }
 
@@ -215,8 +220,12 @@ export class ProofService {
    */
   getProviderDescription(providerName: string): string {
     switch (providerName) {
+      case 'wallet':
+        return 'Midnight Wallet (1AM/Lace)';
       case 'lace':
         return 'Lace Wallet';
+      case '1am':
+        return '1AM Wallet';
       case 'http':
         return 'Local Proof Server (Docker)';
       case 'mock':
