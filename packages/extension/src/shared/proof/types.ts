@@ -55,6 +55,10 @@ export interface ProofResult {
   providerName?: string;
   /** Whether this is a mock proof (for UI indication) */
   isMock?: boolean;
+  /** Transaction hash (for wallet-based proofs that submit to network) */
+  txHash?: string;
+  /** Name of the wallet used (e.g., '1am', 'lace') */
+  walletName?: string;
 }
 
 /**
@@ -144,4 +148,22 @@ export interface AuthResponse {
   error?: string;
   /** Whether this was a mock proof */
   isMock?: boolean;
+}
+
+// ─── Security Utilities ─────────────────────────────────────────────────────
+
+/**
+ * Zero out sensitive buffers to minimize time secrets reside in memory.
+ *
+ * Call this after using witness data (secret, blinder) to reduce exposure window.
+ * Note: This is a best-effort defense - JavaScript GC may retain copies.
+ *
+ * @param buffers - One or more Uint8Array buffers to zero out
+ */
+export function clearSensitiveBuffers(...buffers: Uint8Array[]): void {
+  for (const buffer of buffers) {
+    if (buffer && buffer.fill) {
+      buffer.fill(0);
+    }
+  }
 }

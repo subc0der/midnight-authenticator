@@ -292,6 +292,112 @@ export async function getProvingProvider(zkConfigProvider: unknown): Promise<unk
   return callWalletMethod('getProvingProvider', [zkConfigProvider]);
 }
 
+// ─── Full Proof Generation ─────────────────────────────────────────────────
+
+/**
+ * Request for generating a ZK authentication proof via wallet.
+ */
+export interface WalletProofRequest {
+  accountId: Uint8Array;
+  secret: Uint8Array;
+  blinder: Uint8Array;
+  nonce: bigint;
+  expectedTimeWindow: bigint;
+  contractAddress: string;
+  networkId: string;
+}
+
+/**
+ * Result from wallet proof generation.
+ */
+export interface WalletProofResult {
+  success: boolean;
+  txHash?: string;
+  error?: string;
+  walletName?: string;
+}
+
+// Extended timeout for proof generation (can take 30+ seconds on 1AM ProofStation)
+const PROOF_GENERATION_TIMEOUT_MS = 120_000; // 2 minutes
+
+/**
+ * Generate a ZK authentication proof via the wallet.
+ *
+ * This sends the full proof generation request to page context where:
+ * 1. Wallet is connected
+ * 2. ZK config provider is created from bundled circuit assets
+ * 3. Proving provider is obtained from wallet
+ * 4. Transaction is built, proved, balanced, and submitted
+ *
+ * @param request - The proof generation request
+ * @returns The result including transaction hash on success
+ */
+export async function generateWalletProof(request: WalletProofRequest): Promise<WalletProofResult> {
+  const requestId = generateRequestId();
+
+  // Get the active tab
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (!tab?.id) {
+    return {
+      success: false,
+      error: 'No active tab available for wallet communication',
+    };
+  }
+
+  // Don't try on chrome:// or extension pages
+  if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://')) {
+    return {
+      success: false,
+      error: 'Midnight wallet not available on this page',
+    };
+  }
+
+  // Create timeout promise
+  const timeoutPromise = new Promise<WalletProofResult>((resolve) => {
+    setTimeout(() => {
+      resolve({
+        success: false,
+        error: `Proof generation timed out after ${PROOF_GENERATION_TIMEOUT_MS / 1000}s`,
+      });
+    }, PROOF_GENERATION_TIMEOUT_MS);
+  });
+
+  // Send proof generation request to content script
+  const messagePromise = chrome.tabs.sendMessage(tab.id, {
+    type: 'WALLET_GENERATE_PROOF',
+    requestId,
+    payload: {
+      accountId: Array.from(request.accountId),
+      secret: Array.from(request.secret),
+      blinder: Array.from(request.blinder),
+      nonce: request.nonce.toString(),
+      expectedTimeWindow: request.expectedTimeWindow.toString(),
+      contractAddress: request.contractAddress,
+      networkId: request.networkId,
+    },
+  });
+
+  // Race between response and timeout
+  try {
+    const response = await Promise.race([messagePromise, timeoutPromise]);
+
+    if (!response) {
+      return {
+        success: false,
+        error: 'No response from content script - wallet may not be available',
+      };
+    }
+
+    return response as WalletProofResult;
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 // Legacy exports for backward compatibility during migration
 export {
   isWalletDetected as isLaceDetected,

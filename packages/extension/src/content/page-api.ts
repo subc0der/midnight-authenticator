@@ -174,6 +174,20 @@ const midnightAuth: MidnightAuthAPI = {
 const WALLET_PRIORITY = ['1am', 'lace'] as const;
 type WalletName = (typeof WALLET_PRIORITY)[number];
 
+// ─── Proof Generation Types ────────────────────────────────────────────────
+
+interface ProofGenerationMessage {
+  requestId: string;
+  circuitBaseUrl: string;
+  accountId: number[];
+  secret: number[];
+  blinder: number[];
+  nonce: string;
+  expectedTimeWindow: string;
+  contractAddress: string;
+  networkId: string;
+}
+
 // Listen for wallet status check from content script
 // This runs in page context so it CAN see window.midnight
 window.addEventListener('message', (event) => {
@@ -191,6 +205,11 @@ window.addEventListener('message', (event) => {
     // Handle wallet method call
     handleWalletCall(message.requestId, message.method, message.args, message.networkId || 'preprod');
   }
+
+  if (message.type === 'WALLET_GENERATE_PROOF') {
+    // Handle full proof generation flow
+    handleWalletProofGeneration(message as unknown as ProofGenerationMessage);
+  }
 });
 
 /**
@@ -200,6 +219,8 @@ window.addEventListener('message', (event) => {
  * Discovery patterns:
  * - 1AM: Fixed key at window.midnight['1am']
  * - Lace: Random UUID keys, find by .name === 'lace'
+ *
+ * TODO: Re-enable Lace discovery after 1AM integration is tested
  */
 function findBestWallet(midnight: any): { wallet: any; name: WalletName | string } | null {
   if (!midnight || typeof midnight !== 'object') return null;
@@ -211,24 +232,29 @@ function findBestWallet(midnight: any): { wallet: any; name: WalletName | string
     return { wallet: oneAmWallet, name: '1am' };
   }
 
-  // 2. Check for Lace by iterating (uses random UUID keys)
-  for (const [key, value] of Object.entries(midnight)) {
-    const wallet = value as any;
-    if (wallet?.name === 'lace' && typeof wallet.connect === 'function') {
-      console.log(`[PageAPI] Found Lace wallet at window.midnight['${key}']`);
-      return { wallet, name: 'lace' };
-    }
-  }
+  // TEMPORARILY DISABLED: Lace wallet discovery
+  // Re-enable after 1AM integration is fully tested
+  // --------------------------------------------------
+  // // 2. Check for Lace by iterating (uses random UUID keys)
+  // for (const [key, value] of Object.entries(midnight)) {
+  //   const wallet = value as any;
+  //   if (wallet?.name === 'lace' && typeof wallet.connect === 'function') {
+  //     console.log(`[PageAPI] Found Lace wallet at window.midnight['${key}']`);
+  //     return { wallet, name: 'lace' };
+  //   }
+  // }
+  //
+  // // 3. Fallback: any wallet with connect method (future wallets)
+  // for (const [key, value] of Object.entries(midnight)) {
+  //   const wallet = value as any;
+  //   if (wallet && typeof wallet.connect === 'function') {
+  //     console.warn(`[PageAPI] Using unknown wallet '${wallet.name || key}' at window.midnight['${key}']`);
+  //     return { wallet, name: wallet.name || key };
+  //   }
+  // }
+  // --------------------------------------------------
 
-  // 3. Fallback: any wallet with connect method (future wallets)
-  for (const [key, value] of Object.entries(midnight)) {
-    const wallet = value as any;
-    if (wallet && typeof wallet.connect === 'function') {
-      console.warn(`[PageAPI] Using unknown wallet '${wallet.name || key}' at window.midnight['${key}']`);
-      return { wallet, name: wallet.name || key };
-    }
-  }
-
+  console.warn('[PageAPI] No 1AM wallet found. Install 1AM wallet from https://1am.xyz');
   return null;
 }
 
@@ -384,6 +410,168 @@ async function handleWalletCall(
       }
     }
     sendResponse(false, undefined, message);
+  }
+}
+
+// ─── Full Proof Generation Handler ─────────────────────────────────────────
+
+/**
+ * Handle full ZK proof generation via wallet.
+ *
+ * Flow:
+ * 1. Connect to wallet (1AM preferred)
+ * 2. Create FetchZkConfigProvider from bundled circuit assets
+ * 3. Get proving provider from wallet
+ * 4. Build unproven transaction using contract
+ * 5. Prove transaction
+ * 6. Balance transaction
+ * 7. Submit to network
+ *
+ * Note: This implementation assumes the wallet handles most of the complexity.
+ * 1AM uses server-side ProofStation for proving, no Docker required.
+ */
+async function handleWalletProofGeneration(message: ProofGenerationMessage): Promise<void> {
+  const sendResponse = (success: boolean, txHash?: string, error?: string, walletName?: string) => {
+    window.postMessage({
+      type: 'WALLET_PROOF_RESPONSE',
+      source: `${PAGE_API_EXTENSION_ID}-page`,
+      requestId: message.requestId,
+      success,
+      txHash,
+      error,
+      walletName,
+    }, window.location.origin);
+  };
+
+  try {
+    // Defense-in-depth: Validate circuit URL comes from our extension
+    // The content script generates this via chrome.runtime.getURL(), but we verify anyway
+    if (!message.circuitBaseUrl || !message.circuitBaseUrl.startsWith('chrome-extension://')) {
+      sendResponse(false, undefined, 'Invalid circuit URL: must be extension protocol');
+      return;
+    }
+
+    console.log('[PageAPI] Starting proof generation...');
+    console.log('[PageAPI] Contract address:', message.contractAddress);
+    console.log('[PageAPI] Network:', message.networkId);
+
+    // 1. Find and connect wallet
+    const midnight = (window as any).midnight;
+    const found = findBestWallet(midnight);
+
+    if (!found) {
+      sendResponse(false, undefined, 'No 1AM wallet found. Install from https://1am.xyz');
+      return;
+    }
+
+    console.log(`[PageAPI] Connecting to ${found.name} wallet...`);
+    const connectedApi = await found.wallet.connect(message.networkId);
+
+    if (!connectedApi) {
+      sendResponse(false, undefined, `Failed to connect to ${found.name} wallet`, found.name);
+      return;
+    }
+
+    console.log(`[PageAPI] Connected to ${found.name} wallet`);
+
+    // 2. Get wallet configuration (for indexer URL, prover server, etc.)
+    const config = await connectedApi.getConfiguration();
+    console.log('[PageAPI] Wallet config:', config);
+
+    // 3. Create ZK config provider
+    // For 1AM, the wallet handles proving server-side via ProofStation
+    // We still need to provide circuit asset URLs for the prover to fetch
+    console.log('[PageAPI] Circuit base URL:', message.circuitBaseUrl);
+
+    // The FetchZkConfigProvider would normally be used here:
+    // const zkConfigProvider = new FetchZkConfigProvider(message.circuitBaseUrl, fetch.bind(window));
+
+    // 4. Get proving provider from wallet
+    // Note: For 1AM, this returns a provider that delegates to ProofStation
+    console.log('[PageAPI] Getting proving provider from wallet...');
+
+    // Try to get the proving provider
+    // This may throw if the wallet doesn't support getProvingProvider
+    let provingProvider: unknown;
+    try {
+      // Pass a simple config object - the wallet will use its own proving service
+      provingProvider = await connectedApi.getProvingProvider({
+        // Circuit assets URL - wallet may fetch these for proof generation
+        circuitAssetsUrl: message.circuitBaseUrl,
+        // Contract name for circuit lookup
+        contractName: 'totp-verifier',
+      });
+      console.log('[PageAPI] Got proving provider');
+    } catch (e) {
+      console.error('[PageAPI] getProvingProvider failed:', e);
+      // If getProvingProvider fails, we'll try a different approach
+      // Some wallets may handle proving differently
+    }
+
+    // 5. Convert input arrays back to proper types
+    const accountId = new Uint8Array(message.accountId);
+    const secret = new Uint8Array(message.secret);
+    const blinder = new Uint8Array(message.blinder);
+    const nonce = BigInt(message.nonce);
+    const expectedTimeWindow = BigInt(message.expectedTimeWindow);
+
+    // Helper to clear sensitive buffers (called in finally block)
+    const clearSecrets = () => {
+      secret.fill(0);
+      blinder.fill(0);
+    };
+
+    try {
+      // 6. Build the authentication transaction
+      // This is where we'd call the contract's authenticate circuit
+      // The implementation depends on how the contract module is loaded
+
+      // For now, we'll use a simpler approach:
+      // Create the proof request data structure that the wallet can understand
+      const authRequest = {
+        circuit: 'authenticate',
+        contractAddress: message.contractAddress,
+        inputs: {
+          accountId: Array.from(accountId),
+          nonce: nonce.toString(),
+          expectedTimeWindow: expectedTimeWindow.toString(),
+        },
+        witnesses: {
+          secret: Array.from(secret),
+          blinder: Array.from(blinder),
+        },
+      };
+
+      console.log('[PageAPI] Auth request prepared (circuit: authenticate)');
+
+      // TODO: Full SDK integration
+      // The complete flow would be:
+      // 1. Load contract module (bundled with extension)
+      // 2. Join deployed contract using findDeployedContract()
+      // 3. Call contract.callTx.authenticate(accountId, nonce, expectedTimeWindow)
+      // 4. The SDK handles proving, balancing, and submission
+      //
+      // For now, we return an error indicating SDK integration is needed
+      // This allows us to test the message flow end-to-end
+
+      // Temporary: Return error until full SDK integration is complete
+      sendResponse(
+        false,
+        undefined,
+        'Proof generation not yet implemented. Wallet connected successfully to ' +
+          `${found.name} on ${message.networkId}. ` +
+          'Next: Bundle contract module for page context.',
+        found.name
+      );
+    } finally {
+      // Always zero out sensitive data, even on error
+      clearSecrets();
+    }
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[PageAPI] Proof generation error:', error);
+    sendResponse(false, undefined, errorMessage);
   }
 }
 

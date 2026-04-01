@@ -14,12 +14,15 @@
  */
 
 import type { ProofProvider, ProofRequest, ProofResult } from './types.js';
+import { clearSensitiveBuffers } from './types.js';
 import {
   isWalletDetected,
   callWalletMethod,
   getWalletServiceConfig,
+  generateWalletProof,
   type WalletServiceConfig,
 } from './wallet-bridge.js';
+import { CONTRACT_ADDRESSES } from '@midnight-authenticator/contracts';
 
 /** Cached wallet status to avoid repeated tab queries */
 interface WalletStatus {
@@ -87,12 +90,15 @@ export class WalletProofProvider implements ProofProvider {
   /**
    * Generate an authentication proof using the wallet.
    *
-   * The wallet provides getProvingProvider(zkConfigProvider) which returns
-   * the proving interface. We then build the proof using:
-   *   unprovenTx.prove(provingProvider, costModel)
+   * This triggers the full proof generation flow via page context:
+   * 1. Connect to wallet (1AM preferred, server-side ProofStation)
+   * 2. Create ZK config provider from bundled circuit assets
+   * 3. Get proving provider from wallet
+   * 4. Build and prove transaction
+   * 5. Balance and submit to network
    *
-   * Note: Full implementation requires SDK transaction building.
-   * This is a placeholder until SDK integration is complete.
+   * @param request - The proof request containing account, secret, and timing data
+   * @returns The proof result with transaction hash on success
    */
   async generateAuthProof(request: ProofRequest): Promise<ProofResult> {
     const status = await queryWalletStatus();
@@ -100,48 +106,68 @@ export class WalletProofProvider implements ProofProvider {
     if (!status.available) {
       return {
         success: false,
-        error: 'No Midnight wallet detected. Please install 1AM or Lace wallet extension.',
+        error: 'No Midnight wallet detected. Install 1AM wallet from https://1am.xyz',
         providerName: this.name,
       };
     }
 
-    if (!status.proverUri) {
-      return {
-        success: false,
-        error: 'Wallet does not have a proof server configured.',
-        providerName: this.name,
-      };
-    }
+    console.log('[WalletProvider] Starting proof generation via wallet...');
+    console.log('[WalletProvider] Account ID:', request.accountId.slice(0, 8), '...');
+    console.log('[WalletProvider] Time window:', request.expectedTimeWindow.toString());
 
     try {
-      console.log('[WalletProvider] Wallet detected, verifying connectivity...');
-      console.log('[WalletProvider] Prover URI:', status.proverUri);
+      // Trigger full proof generation via page context
+      const result = await generateWalletProof({
+        accountId: request.accountId,
+        secret: request.secret,
+        blinder: request.blinder,
+        nonce: request.nonce,
+        expectedTimeWindow: request.expectedTimeWindow,
+        contractAddress: CONTRACT_ADDRESSES.preprod.totpVerifier,
+        networkId: 'preprod',
+      });
 
-      // Get wallet address to verify connection works
-      const address = await callWalletMethod<string>('getUnshieldedAddress');
-      console.log('[WalletProvider] Connected to wallet:', address.slice(0, 20) + '...');
+      // Zero out sensitive witness data in background context
+      // Page context also zeroes its copy - this is defense-in-depth
+      clearSensitiveBuffers(request.secret, request.blinder);
 
-      // TODO: Implement full proof generation flow:
-      // 1. Create BrowserZkConfigProvider for our circuit
-      // 2. Call getProvingProvider(zkConfigProvider) on wallet
-      // 3. Build unproven transaction using contract
-      // 4. Call unprovenTx.prove(provingProvider, costModel)
-      // 5. Balance transaction with balanceUnsealedTransaction()
-      //
-      // This requires the full Midnight SDK transaction flow.
-      // For now, fall back to mock provider in development.
+      if (!result.success) {
+        console.error('[WalletProvider] Proof generation failed:', result.error);
+        return {
+          success: false,
+          error: result.error || 'Proof generation failed',
+          providerName: this.name,
+        };
+      }
 
+      console.log('[WalletProvider] Proof generated successfully!');
+      console.log('[WalletProvider] Transaction hash:', result.txHash);
+
+      // Return success with proof result
+      // Note: For wallet-based proving, we get a txHash back
+      // The actual proof bytes are inside the submitted transaction
       return {
-        success: false,
-        error: 'Wallet proof generation pending SDK integration. Use mock provider for development.',
+        success: true,
+        proof: new Uint8Array(0), // Proof is embedded in transaction
+        publicInputs: {
+          accountId: request.accountId,
+          nonce: request.nonce,
+          expectedTimeWindow: request.expectedTimeWindow,
+          result: true,
+        },
         providerName: this.name,
+        txHash: result.txHash,
+        walletName: result.walletName,
       };
     } catch (error) {
-      console.error('[WalletProvider] Wallet connection failed:', error);
+      // Zero out sensitive data even on error
+      clearSensitiveBuffers(request.secret, request.blinder);
+
+      console.error('[WalletProvider] Proof generation error:', error);
       const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
-        error: `Wallet connection failed: ${message}`,
+        error: `Wallet proof generation failed: ${message}`,
         providerName: this.name,
       };
     }

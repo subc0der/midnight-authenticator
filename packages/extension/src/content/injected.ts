@@ -27,6 +27,9 @@ const pendingWalletChecks = new Map<string, (response: { walletAvailable: boolea
 // Pending wallet method calls (waiting for page context response)
 const pendingWalletCalls = new Map<string, (response: { success: boolean; result?: unknown; error?: string; walletName?: string }) => void>();
 
+// Pending wallet proof generation requests
+const pendingWalletProofs = new Map<string, (response: { success: boolean; txHash?: string; error?: string; walletName?: string }) => void>();
+
 // Listen for wallet status from page context
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin) return;
@@ -54,6 +57,20 @@ window.addEventListener('message', (event) => {
       callback({
         success: message.success,
         result: message.result,
+        error: message.error,
+        walletName: message.walletName,
+      });
+    }
+  }
+
+  // Handle wallet proof generation response from page context
+  if (message.type === 'WALLET_PROOF_RESPONSE') {
+    const callback = pendingWalletProofs.get(message.requestId);
+    if (callback) {
+      pendingWalletProofs.delete(message.requestId);
+      callback({
+        success: message.success,
+        txHash: message.txHash,
         error: message.error,
         walletName: message.walletName,
       });
@@ -160,6 +177,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       method,
       args,
       networkId: networkId || 'preprod',
+    }, window.location.origin);
+
+    return true;
+  }
+
+  // Handle full proof generation request from background
+  // This triggers the complete flow: connect wallet → prove → balance → submit
+  if (message.type === 'WALLET_GENERATE_PROOF') {
+    const { requestId, payload } = message;
+
+    // Extended timeout for proof generation (2 minutes)
+    const timeoutId = setTimeout(() => {
+      pendingWalletProofs.delete(requestId);
+      sendResponse({ success: false, error: 'Proof generation timed out' });
+    }, 120_000);
+
+    pendingWalletProofs.set(requestId, (response) => {
+      clearTimeout(timeoutId);
+      sendResponse(response);
+    });
+
+    // Compute circuit asset URLs using extension's getURL
+    const circuitBaseUrl = chrome.runtime.getURL('circuits/totp-verifier');
+
+    // Forward to page context with circuit URLs
+    window.postMessage({
+      type: 'WALLET_GENERATE_PROOF',
+      source: `${INJECTED_EXTENSION_ID}-content`,
+      requestId,
+      circuitBaseUrl,
+      ...payload,
     }, window.location.origin);
 
     return true;

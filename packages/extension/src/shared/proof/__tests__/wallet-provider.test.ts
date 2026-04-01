@@ -8,11 +8,13 @@ import type { ProofRequest } from '../types';
 const mockIsWalletDetected = vi.fn();
 const mockGetWalletServiceConfig = vi.fn();
 const mockCallWalletMethod = vi.fn();
+const mockGenerateWalletProof = vi.fn();
 
 vi.mock('../wallet-bridge.js', () => ({
   isWalletDetected: () => mockIsWalletDetected(),
   getWalletServiceConfig: () => mockGetWalletServiceConfig(),
   callWalletMethod: (...args: unknown[]) => mockCallWalletMethod(...args),
+  generateWalletProof: (request: unknown) => mockGenerateWalletProof(request),
 }));
 
 // Now import wallet-provider after mocking
@@ -64,6 +66,7 @@ describe('WalletProofProvider', () => {
     mockIsWalletDetected.mockResolvedValue(false);
     mockGetWalletServiceConfig.mockResolvedValue(null);
     mockCallWalletMethod.mockRejectedValue(new Error('Not mocked'));
+    mockGenerateWalletProof.mockResolvedValue({ success: false, error: 'Not mocked' });
   });
 
   afterEach(() => {
@@ -177,51 +180,60 @@ describe('WalletProofProvider', () => {
       expect(result.providerName).toBe('wallet');
     });
 
-    it('should return error when no prover URI configured', async () => {
-      mockIsWalletDetected.mockResolvedValue(true);
-      mockGetWalletServiceConfig.mockResolvedValue(null);
-
-      const request = createValidRequest();
-      const result = await provider.generateAuthProof(request);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('proof server configured');
-      expect(result.providerName).toBe('wallet');
-    });
-
-    it('should return pending SDK message when wallet is configured', async () => {
+    it('should call generateWalletProof when wallet is available', async () => {
       mockIsWalletDetected.mockResolvedValue(true);
       mockGetWalletServiceConfig.mockResolvedValue({
         proverServerUri: 'http://1am-prover:6300',
       });
-      // Mock getUnshieldedAddress succeeding
-      mockCallWalletMethod.mockImplementation((method: string) => {
-        if (method === 'getUnshieldedAddress') return Promise.resolve('test-address-12345');
-        return Promise.reject(new Error('Not mocked'));
+      mockGenerateWalletProof.mockResolvedValue({
+        success: false,
+        error: 'Proof generation not yet implemented',
       });
 
       const request = createValidRequest();
       const result = await provider.generateAuthProof(request);
 
-      // Should return "pending SDK" since full integration is not yet complete
       expect(result.success).toBe(false);
-      expect(result.error).toContain('pending SDK integration');
+      expect(result.error).toContain('Proof generation');
       expect(result.providerName).toBe('wallet');
+      expect(mockGenerateWalletProof).toHaveBeenCalled();
     });
 
-    it('should return connection error when wallet call fails', async () => {
+    it('should return success with txHash on successful proof', async () => {
       mockIsWalletDetected.mockResolvedValue(true);
       mockGetWalletServiceConfig.mockResolvedValue({
         proverServerUri: 'http://1am-prover:6300',
       });
-      // Mock getUnshieldedAddress failing
-      mockCallWalletMethod.mockRejectedValue(new Error('Wallet disconnected'));
+      mockGenerateWalletProof.mockResolvedValue({
+        success: true,
+        txHash: 'abc123',
+        walletName: '1am',
+      });
+
+      const request = createValidRequest();
+      const result = await provider.generateAuthProof(request);
+
+      expect(result.success).toBe(true);
+      expect(result.txHash).toBe('abc123');
+      expect(result.walletName).toBe('1am');
+      expect(result.providerName).toBe('wallet');
+    });
+
+    it('should return error when generateWalletProof fails', async () => {
+      mockIsWalletDetected.mockResolvedValue(true);
+      mockGetWalletServiceConfig.mockResolvedValue({
+        proverServerUri: 'http://1am-prover:6300',
+      });
+      mockGenerateWalletProof.mockResolvedValue({
+        success: false,
+        error: 'No active tab available',
+      });
 
       const request = createValidRequest();
       const result = await provider.generateAuthProof(request);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('Wallet connection failed');
+      expect(result.error).toContain('No active tab');
       expect(result.providerName).toBe('wallet');
     });
   });
